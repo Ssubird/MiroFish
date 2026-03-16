@@ -7,31 +7,19 @@ from dataclasses import dataclass
 
 from ..models import StrategyPrediction
 from .base import StrategyAgent
-from .helpers import hot_counts, miss_streaks, rank_scores, recent_history, region_index, select_numbers, tail_index
+from .helpers import (
+    hot_counts,
+    miss_streaks,
+    rank_scores,
+    recent_history,
+    region_index,
+    select_numbers,
+    tail_index,
+)
 
 
 GROUP = "data"
 SHORT_WINDOW = 12
-
-
-@dataclass(frozen=True)
-class HotWindowAgent(StrategyAgent):
-    window: int
-
-    def predict(self, context, pick_size: int) -> StrategyPrediction:
-        self.ensure_history(context)
-        segment = recent_history(context.history_draws, self.window)
-        counts = hot_counts(segment)
-        streaks = miss_streaks(segment)
-        scores = {number: counts[number] * 10.0 + streaks[number] * 0.1 for number in range(1, 81)}
-        return StrategyPrediction(
-            strategy_id=self.strategy_id,
-            display_name=self.display_name,
-            group=self.group,
-            numbers=select_numbers(scores, pick_size),
-            rationale=f"统计最近 {self.window} 期热号频次，并用遗漏长度做轻微打散。",
-            ranked_scores=rank_scores(scores, pick_size),
-        )
 
 
 @dataclass(frozen=True)
@@ -131,7 +119,6 @@ class StructureBalanceAgent(StrategyAgent):
 
 def build_data_agents() -> dict[str, StrategyAgent]:
     agents = [
-        HotWindowAgent("hot_50", "热号-50期", "统计最近 50 期高频号码。", 50, GROUP, window=50),
         ColdWindowAgent("cold_50", "冷号-50期", "结合冷号与遗漏长度排序。", 50, GROUP, window=50),
         MissStreakAgent("miss_120", "遗漏-120期", "按最近 120 期遗漏长度排序。", 120, GROUP, window=120),
         MomentumShiftAgent("momentum_60", "动量-60期", "比较短窗和长窗频次差，抓升温号码。", 60, GROUP, window=60),

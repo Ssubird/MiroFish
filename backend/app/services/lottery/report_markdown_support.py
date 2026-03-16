@@ -62,13 +62,60 @@ def social_state_section(state: dict[str, object]) -> list[str]:
 def world_state_section(state: dict[str, object]) -> list[str]:
     if not state:
         return []
+    issue_rows = state.get('issue_history', []) or state.get('settlement_history', [])
     return [
         "### World State",
         "",
-        f"- Recent Issues: `{world_issue_history(state.get('issue_history', []))}`",
+        f"- Recent Issues: `{world_issue_history(issue_rows)}`",
         f"- Trend Numbers: `{world_trends(state.get('trend_numbers', []))}`",
         f"- Public Posts: `{world_posts(state.get('public_posts', []))}`",
         f"- Interview History: `{world_interviews(state.get('interview_history', []))}`",
+        "",
+    ]
+
+
+def live_interviews_section(rows: list[dict[str, object]]) -> list[str]:
+    if not rows:
+        return []
+    lines = ["### Live Interviews", ""]
+    for item in rows:
+        lines.extend(
+            [
+                f"- {item.get('actor_display_name', item.get('display_name', item.get('actor_id', '-')))} (`{item.get('actor_id', item.get('agent_id', '-'))}`)",
+                f"- Numbers: `{number_line(item.get('numbers', []))}`",
+                f"- Answer: {item.get('content', item.get('answer', '-'))}",
+                "",
+            ]
+        )
+    return lines
+
+
+def world_timeline_section(rows: list[dict[str, object]]) -> list[str]:
+    if not rows:
+        return []
+    lines = ["### World Timeline", ""]
+    for item in rows:
+        lines.extend(
+            [
+                f"- `{item.get('phase', '-')}` / `{item.get('event_type', '-')}` / {item.get('actor_display_name', '-')}",
+                f"- Numbers: `{number_line(item.get('numbers', []))}`",
+                f"- Content: {item.get('content', '-')}",
+                "",
+            ]
+        )
+    return lines
+
+
+def judge_section(decision: dict[str, object]) -> list[str]:
+    if not decision:
+        return []
+    return [
+        "### Judge Decision",
+        "",
+        f"- Primary 5 Numbers: `{number_line(decision.get('primary_numbers', []))}`",
+        f"- Alternate 3 Numbers: `{number_line(decision.get('alternate_numbers', []))}`",
+        f"- Trusted Strategies: `{', '.join(decision.get('trusted_strategy_ids', [])) or '-'}`",
+        f"- Rationale: {decision.get('rationale', '-')}",
         "",
     ]
 
@@ -88,6 +135,7 @@ def purchase_section(plan: dict[str, object]) -> list[str]:
         [
             f"- Planner: `{planner.get('display_name', '-')}` / Model: `{planner.get('model', '-')}`",
             f"- Plan Type: `{plan.get('plan_type', planner.get('plan_type', '-'))}` / Style: `{planner.get('plan_style', '-')}`",
+            f"- Chosen Edge: {plan.get('chosen_edge', planner.get('chosen_edge', '-')) or '-'}",
             f"- Trusted Strategies: `{', '.join(planner.get('trusted_strategy_ids', [])) or '-'}`",
             f"- Core Numbers: `{number_line(planner.get('core_numbers', []))}`",
             f"- Hedge Numbers: `{number_line(planner.get('hedge_numbers', []))}`",
@@ -97,6 +145,8 @@ def purchase_section(plan: dict[str, object]) -> list[str]:
     )
     if planner.get("user_prompt_preview"):
         lines.append(f"- Planner Prompt Preview: {planner['user_prompt_preview']}")
+    elif planner.get("prompt_preview"):
+        lines.append(f"- Planner Prompt Preview: {planner['prompt_preview']}")
     lines.extend(purchase_committee_section(plan.get("discussion_agents") or []))
     lines.extend(purchase_discussion_section(plan.get("discussion_trace") or []))
     lines.extend(plan_structure_lines(structure))
@@ -130,13 +180,16 @@ def purchase_committee_section(rows: list[dict[str, object]]) -> list[str]:
 def purchase_committee_item(item: dict[str, object]) -> list[str]:
     lines = [
         f"- {item.get('display_name', item.get('role_id', '-'))} (`{item.get('role_id', '-')}`)",
-        f"- Plan Type: `{item.get('plan_type', '-')}` / Style: `{item.get('plan_style', '-')}`",
+        f"- Plan Type: `{item.get('plan_type', '-')}` / Play Size: `{item.get('play_size', '-')}` / Style: `{item.get('plan_style', '-')}`",
+        f"- Chosen Edge: {item.get('chosen_edge', '-') or '-'}",
         f"- Proposed Numbers: `{number_line(proposed_numbers(item))}`",
         f"- Trusted Strategies: `{', '.join(item.get('trusted_strategy_ids', [])) or '-'}`",
         f"- Rationale: {item.get('rationale', '-')}",
     ]
     if item.get("user_prompt_preview"):
         lines.append(f"- Prompt Preview: {item['user_prompt_preview']}")
+    elif item.get("prompt_preview"):
+        lines.append(f"- Prompt Preview: {item['prompt_preview']}")
     lines.append("")
     return lines
 
@@ -156,7 +209,7 @@ def purchase_discussion_item(item: dict[str, object]) -> list[str]:
         (
             f"- Round `{item.get('round', '-')}` / "
             f"{item.get('display_name', item.get('role_id', '-'))} / "
-            f"Plan `{item.get('plan_type', '-')}` / Support `{support}`"
+            f"Plan `{item.get('plan_type', '-')}` / Play `{item.get('play_size', '-')}` / Support `{support}`"
         ),
         f"- Numbers: `{number_line(proposed_numbers(item))}`",
         f"- Comment: {item.get('comment', '-')}",
@@ -226,6 +279,13 @@ def metadata_lines(metadata: dict[str, object]) -> list[str]:
 
 def plan_structure_lines(structure: dict[str, object]) -> list[str]:
     lines = []
+    if structure.get("portfolio_legs"):
+        lines.append(f"- Portfolio Legs: `{len(structure.get('portfolio_legs', []))}`")
+        for leg in structure.get("portfolio_legs", []):
+            lines.extend(_portfolio_leg_lines(leg))
+        if structure.get("combination_count") is not None:
+            lines.append(f"- Total Ticket Count: `{structure.get('combination_count')}`")
+        return lines
     if structure.get("primary_ticket"):
         lines.append(f"- Primary Ticket: `{number_line(structure['primary_ticket'])}`")
     if structure.get("wheel_numbers"):
@@ -240,12 +300,42 @@ def plan_structure_lines(structure: dict[str, object]) -> list[str]:
 
 
 def proposed_numbers(item: dict[str, object]) -> list[object]:
+    if item.get("portfolio_legs"):
+        return _portfolio_numbers(item.get("portfolio_legs", []))
     if item.get("primary_ticket"):
         return list(item["primary_ticket"])
     if item.get("wheel_numbers"):
         return list(item["wheel_numbers"])
     numbers = list(item.get("banker_numbers", []))
     numbers.extend(number for number in item.get("drag_numbers", []) if number not in numbers)
+    return numbers
+
+
+def _portfolio_leg_lines(leg: dict[str, object]) -> list[str]:
+    label = leg.get("play_label", f"选{leg.get('play_size', '-')}")
+    lines = [
+        (
+            f"- Leg `{leg.get('index', '-')}` / Type `{leg.get('plan_type', '-')}` / "
+            f"Play `{label}` / Tickets `{leg.get('ticket_count', leg.get('combination_count', '-'))}`"
+        )
+    ]
+    if leg.get("tickets"):
+        lines.append(f"- Leg Ticket Grid: `{number_line(leg.get('tickets', []))}`")
+    if leg.get("wheel_numbers"):
+        lines.append(f"- Leg Wheel Numbers: `{number_line(leg.get('wheel_numbers', []))}`")
+    if leg.get("banker_numbers"):
+        lines.append(f"- Leg Banker Numbers: `{number_line(leg.get('banker_numbers', []))}`")
+    if leg.get("drag_numbers"):
+        lines.append(f"- Leg Drag Numbers: `{number_line(leg.get('drag_numbers', []))}`")
+    return lines
+
+
+def _portfolio_numbers(legs: list[dict[str, object]]) -> list[object]:
+    numbers = []
+    for leg in legs:
+        for value in proposed_numbers(leg):
+            if value not in numbers:
+                numbers.append(value)
     return numbers
 
 

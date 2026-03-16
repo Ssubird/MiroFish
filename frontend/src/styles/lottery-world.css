@@ -1,0 +1,101 @@
+.world-page {
+  min-height: 100vh;
+  padding: 1.35rem;
+  color: #1d1b19;
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(176, 111, 28, 0.15), transparent 22%),
+    linear-gradient(180deg, #e9ddc3 0%, #f6efdf 18%, #fcfaf5 100%);
+  font-family: 'IBM Plex Sans', 'Segoe UI', 'PingFang SC', sans-serif;
+}
+
+.page-header,
+.page-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.page-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.page-grid {
+  grid-template-columns: minmax(18rem, 21rem) minmax(0, 1fr) minmax(22rem, 26rem);
+  align-items: start;
+  margin-top: 1rem;
+}
+
+.left-column,
+.center-column,
+.right-column {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.left-column,
+.right-column {
+  position: sticky;
+  top: 1rem;
+}
+
+.eyebrow,
+.page-copy {
+  color: #6e675f;
+}
+
+.eyebrow,
+.page-header h1,
+.page-copy {
+  margin: 0;
+}
+
+.page-header h1 {
+  font-size: clamp(2rem, 4vw, 3.1rem);
+  line-height: 1.05;
+}
+
+.page-copy {
+  max-width: 48rem;
+  margin-top: 0.55rem;
+  line-height: 1.7;
+}
+
+.home-btn {
+  border: 1px solid rgba(31, 28, 24, 0.14);
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font: inherit;
+}
+
+.error-banner {
+  padding: 1rem 1.15rem;
+  border-radius: 1.2rem;
+  border: 1px solid rgba(180, 35, 24, 0.22);
+  background: rgba(255, 244, 241, 0.94);
+  color: #8f2c22;
+}
+
+@media (max-width: 1420px) {
+  .page-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .left-column,
+  .right-column {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .world-page {
+    padding: 1rem;
+  }
+
+  .page-header {
+    grid-template-columns: 1fr;
+  }
+}

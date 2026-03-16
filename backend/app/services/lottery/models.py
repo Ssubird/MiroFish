@@ -122,6 +122,7 @@ class PredictionContext:
     social_state: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     expert_interviews: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
     world_state: Mapping[str, Any] = field(default_factory=dict)
+    prompt_documents: tuple[KnowledgeDocument, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .performance_summary import performance_rows
-from .purchase_structures import STRUCTURE_NUMBER_LIMIT
+from .purchase_structures import PLAN_TYPE_PORTFOLIO, STRUCTURE_NUMBER_LIMIT
 
 
 PROMPT_PREVIEW_CHARS = 900
@@ -143,6 +143,9 @@ def planner_payload(
         "model": model,
         "plan_style": str(response.get("plan_style", "")).strip() or "balanced",
         "plan_type": str(response.get("plan_type", "")).strip().lower(),
+        "play_size": response.get("play_size"),
+        "play_size_review": _clean_text_map(response.get("play_size_review")),
+        "chosen_edge": str(response.get("chosen_edge", "")).strip(),
         "trusted_strategy_ids": trusted_ids,
         "primary_ticket": clean_numbers(response.get("primary_ticket"), pick_size),
         "core_numbers": clean_numbers(response.get("core_numbers"), TRUSTED_LIMIT),
@@ -152,6 +155,7 @@ def planner_payload(
         "wheel_numbers": clean_numbers(response.get("wheel_numbers"), STRUCTURE_NUMBER_LIMIT),
         "banker_numbers": clean_numbers(response.get("banker_numbers"), max(pick_size - 1, 0)),
         "drag_numbers": clean_numbers(response.get("drag_numbers"), STRUCTURE_NUMBER_LIMIT),
+        "portfolio_legs": _clean_portfolio_legs(response.get("portfolio_legs"), pick_size),
         "rationale": str(response.get("rationale", "")).strip() or "LLM did not provide a purchase rationale.",
         "focus": clean_focus(response.get("focus")),
         "comment": str(response.get("comment", "")).strip(),
@@ -204,7 +208,8 @@ def _proposal_line(row: dict[str, object]) -> str:
     trusted = ", ".join(row.get("trusted_strategy_ids", [])) or "-"
     return (
         f"- {row.get('display_name', row.get('role_id', '-'))} ({row.get('role_id', '-')}) "
-        f"plan_type={row.get('plan_type', '-')}, numbers={numbers}, trusted={trusted}, "
+        f"plan_type={row.get('plan_type', '-')}, play_size={row.get('play_size', '-')}, "
+        f"numbers={numbers}, trusted={trusted}, "
         f"rationale={row.get('rationale', '-')}"
     )
 
@@ -214,17 +219,57 @@ def _discussion_line(row: dict[str, object]) -> str:
     return (
         f"- round {row.get('round', '-')} / {row.get('display_name', row.get('role_id', '-'))}: "
         f"comment={row.get('comment', '-')}, support={support}, "
-        f"plan_type={row.get('plan_type', '-')}, numbers={_proposal_numbers(row)}"
+        f"plan_type={row.get('plan_type', '-')}, play_size={row.get('play_size', '-')}, numbers={_proposal_numbers(row)}"
     )
 
 
 def _proposal_numbers(row: dict[str, object]) -> list[int]:
+    if row.get("plan_type") == PLAN_TYPE_PORTFOLIO and isinstance(row.get("portfolio_legs"), list):
+        return _portfolio_numbers(row["portfolio_legs"])
     if row.get("primary_ticket"):
         return list(row["primary_ticket"])
     if row.get("wheel_numbers"):
         return list(row["wheel_numbers"])
     numbers = list(row.get("banker_numbers", []))
     numbers.extend(number for number in row.get("drag_numbers", []) if number not in numbers)
+    return numbers
+
+
+def _clean_portfolio_legs(raw: object, pick_size: int) -> list[dict[str, object]]:
+    if not isinstance(raw, list):
+        return []
+    legs = []
+    for item in raw[:TRUSTED_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        legs.append(
+            {
+                "plan_type": str(item.get("plan_type", "")).strip().lower(),
+                "play_size": item.get("play_size"),
+                "tickets": item.get("tickets") if isinstance(item.get("tickets"), list) else [],
+                "wheel_numbers": clean_numbers(item.get("wheel_numbers"), STRUCTURE_NUMBER_LIMIT),
+                "banker_numbers": clean_numbers(item.get("banker_numbers"), max(pick_size - 1, 0)),
+                "drag_numbers": clean_numbers(item.get("drag_numbers"), STRUCTURE_NUMBER_LIMIT),
+                "primary_ticket": clean_numbers(item.get("primary_ticket"), max(pick_size, 1)),
+                "comment": str(item.get("comment", "")).strip(),
+                "rationale": str(item.get("rationale", "")).strip(),
+            }
+        )
+    return legs
+
+
+def _clean_text_map(raw: object) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value).strip() for key, value in raw.items() if str(value).strip()}
+
+
+def _portfolio_numbers(legs: list[dict[str, object]]) -> list[int]:
+    numbers = []
+    for leg in legs:
+        for value in _proposal_numbers(leg):
+            if value not in numbers:
+                numbers.append(value)
     return numbers
 
 

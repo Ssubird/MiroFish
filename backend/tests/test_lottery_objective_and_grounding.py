@@ -6,6 +6,7 @@ from app.services.lottery.deliberation import DialogueCoordinator
 from app.services.lottery.document_filters import grounding_documents
 from app.services.lottery.models import DrawRecord, EnergySignature, KnowledgeDocument, PredictionContext, StrategyPrediction
 from app.services.lottery.purchase_structures import planner_structure
+from app.services.lottery.runtime_helpers import contributor_breakdown
 from app.services.lottery.window_scoring import score_issue_window
 from app.services.lottery.social_state import SocialStateTracker
 from app.services.lottery.world_state import WorldStateTracker
@@ -61,7 +62,7 @@ def test_leaderboard_uses_unified_objective_score():
     assert leaderboard[0]["strategy_roi"] > leaderboard[1]["strategy_roi"]
 
 
-def test_grounding_documents_hide_report_until_after_visible_period():
+def test_grounding_documents_never_include_report_assets():
     documents = (
         KnowledgeDocument("book.md", "knowledge", "knowledge/book.md", 10, "book", ("book",)),
         KnowledgeDocument(
@@ -79,14 +80,16 @@ def test_grounding_documents_hide_report_until_after_visible_period():
         ),
     )
 
-    hidden = grounding_documents(documents, _draw("2026060", "2026-03-10"))
-    visible = grounding_documents(documents, _draw("2026061", "2026-03-11"))
+    active_window = grounding_documents(documents, _draw("2026059", "2026-03-10"))
+    last_window_issue = grounding_documents(documents, _draw("2026060", "2026-03-10"))
+    historical = grounding_documents(documents, _draw("2026061", "2026-03-11"))
 
-    assert [item.kind for item in hidden] == ["knowledge"]
-    assert [item.kind for item in visible] == ["knowledge", "report"]
+    assert [item.kind for item in active_window] == ["knowledge"]
+    assert [item.kind for item in last_window_issue] == ["knowledge"]
+    assert [item.kind for item in historical] == ["knowledge"]
 
 
-def test_grounding_documents_keep_prompt_docs_visible():
+def test_grounding_documents_exclude_prompt_docs_from_evidence():
     documents = (
         KnowledgeDocument("prompt.md", "prompt", "knowledge/prompts/prompt.md", 10, "prompt", ("prompt",)),
         KnowledgeDocument("book.md", "knowledge", "knowledge/book.md", 10, "book", ("book",)),
@@ -94,7 +97,7 @@ def test_grounding_documents_keep_prompt_docs_visible():
 
     visible = grounding_documents(documents, _draw("2026061", "2026-03-11"))
 
-    assert [item.kind for item in visible] == ["prompt", "knowledge"]
+    assert [item.kind for item in visible] == ["knowledge"]
 
 
 def test_expert_interviews_prioritize_top_rule_and_extract_report_evidence():
@@ -250,6 +253,63 @@ class _DialogueAgent:
         return own_prediction, note
 
 
+class _LeadingAgent:
+    supports_dialogue = True
+
+    def deliberate(self, context, own_prediction, peer_predictions, dialogue_history, pick_size, round_index):
+        updated = StrategyPrediction(
+            own_prediction.strategy_id,
+            own_prediction.display_name,
+            own_prediction.group,
+            (6, 7, 8, 9, 10),
+            "leader updates",
+            ((6, 5.0),),
+            own_prediction.kind,
+            own_prediction.metadata or {},
+        )
+        return updated, {
+            "round": round_index,
+            "strategy_id": own_prediction.strategy_id,
+            "display_name": own_prediction.display_name,
+            "group": own_prediction.group,
+            "kind": own_prediction.kind,
+            "comment": "leader moved first",
+            "numbers_before": list(own_prediction.numbers),
+            "numbers_after": list(updated.numbers),
+            "peer_strategy_ids": sorted(peer_predictions),
+        }
+
+
+class _FollowerAgent:
+    supports_dialogue = True
+
+    def deliberate(self, context, own_prediction, peer_predictions, dialogue_history, pick_size, round_index):
+        leader = peer_predictions["a_leader"]
+        assert leader["numbers"] == [6, 7, 8, 9, 10]
+        assert dialogue_history[-1]["strategy_id"] == "a_leader"
+        updated = StrategyPrediction(
+            own_prediction.strategy_id,
+            own_prediction.display_name,
+            own_prediction.group,
+            (6, 11, 12, 13, 14),
+            "follower reacts",
+            ((6, 5.0),),
+            own_prediction.kind,
+            {"saw_peer_numbers": leader["numbers"]},
+        )
+        return updated, {
+            "round": round_index,
+            "strategy_id": own_prediction.strategy_id,
+            "display_name": own_prediction.display_name,
+            "group": own_prediction.group,
+            "kind": own_prediction.kind,
+            "comment": "follower saw live update",
+            "numbers_before": list(own_prediction.numbers),
+            "numbers_after": list(updated.numbers),
+            "peer_strategy_ids": sorted(peer_predictions),
+        }
+
+
 def test_society_dialogue_uses_active_subset_and_group_mix():
     coordinator = DialogueCoordinator()
     strategies = {
@@ -281,6 +341,51 @@ def test_society_dialogue_uses_active_subset_and_group_mix():
     assert len(result.rounds[0]["active_strategy_ids"]) < len(predictions)
     assert "social" in result.rounds[0]["active_groups"]
     assert "judge" in result.rounds[0]["active_groups"]
+
+
+def test_sequential_dialogue_round_reads_live_peer_updates():
+    coordinator = DialogueCoordinator()
+    context = PredictionContext(
+        history_draws=(),
+        target_draw=None,  # type: ignore[arg-type]
+        knowledge_documents=(),
+        chart_profiles=(),
+        graph_snapshot=None,  # type: ignore[arg-type]
+    )
+    result = coordinator.run(
+        context=context,
+        strategies={"a_leader": _LeadingAgent(), "b_follower": _FollowerAgent()},
+        predictions={
+            "a_leader": StrategyPrediction("a_leader", "Leader", "social", (1, 2, 3, 4, 5), "a", ((1, 1.0),), "llm", {}),
+            "b_follower": StrategyPrediction("b_follower", "Follower", "social", (11, 12, 13, 14, 15), "b", ((11, 1.0),), "llm", {}),
+        },
+        pick_size=5,
+        rounds=1,
+        parallelism=1,
+    )
+
+    assert result.predictions["a_leader"].numbers == (6, 7, 8, 9, 10)
+    assert result.predictions["b_follower"].numbers == (6, 11, 12, 13, 14)
+    assert result.rounds[0]["items"][1]["comment"] == "follower saw live update"
+
+
+def test_contributor_breakdown_uses_ranked_score_confidence():
+    predictions = {
+        "cold_rule": StrategyPrediction(
+            "cold_rule",
+            "Cold Rule",
+            "data",
+            (1, 2, 3, 4, 5),
+            "cold",
+            ((1, 10.0), (2, 2.0), (3, 1.0), (4, 1.0), (5, 1.0)),
+        )
+    }
+    contributors = [{"strategy_id": "cold_rule", "objective_score": 0.5, "group_rank": 1}]
+
+    breakdown = contributor_breakdown(predictions, contributors)
+
+    assert breakdown[1]["score"] > breakdown[2]["score"]
+    assert breakdown[2]["score"] > breakdown[3]["score"]
 
 
 def test_planner_structure_supports_wheel_and_dan_tuo():

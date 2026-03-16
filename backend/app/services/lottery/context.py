@@ -24,6 +24,7 @@ def build_prediction_context(
     optimization_goal: str = "联合优化直接命中、策略 ROI、稳定性惩罚与过热惩罚。",
     social_state: dict[str, dict[str, object]] | None = None,
     world_state: dict[str, object] | None = None,
+    prompt_documents: list[KnowledgeDocument] | None = None,
 ) -> PredictionContext:
     visible_charts = _visible_chart_profiles(history_draws, target_draw, chart_profiles)
     active_snapshot = graph_snapshot
@@ -50,6 +51,7 @@ def build_prediction_context(
         optimization_goal=optimization_goal,
         social_state=social_state or {},
         world_state=world_state or {},
+        prompt_documents=tuple(prompt_documents or _prompt_documents(knowledge_documents)),
     )
 
 
@@ -94,3 +96,7 @@ def _visible_chart_profiles(
         if not period or period in visible_periods:
             visible.append(chart)
     return visible
+
+
+def _prompt_documents(knowledge_documents: list[KnowledgeDocument]) -> list[KnowledgeDocument]:
+    return [item for item in knowledge_documents if item.kind == "prompt"]

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from .constants import (
     GRAPH_MODES,
+    SOCIAL_GROUP,
+    RUNTIME_MODES,
+    MIN_BUDGET_YUAN,
+    MAX_BUDGET_YUAN,
     MAX_AGENT_DIALOGUE_ROUNDS,
     MAX_LLM_REQUEST_DELAY_MS,
     MAX_LLM_RETRY_BACKOFF_MS,
@@ -11,18 +15,28 @@ from .constants import (
     MAX_PICK_SIZE,
 )
 
+RETIRED_STRATEGY_IDS = {
+    "social_consensus_feed",
+    "social_risk_feed",
+    "rule_analyst_feed",
+    "consensus_judge",
+    "risk_guard_judge",
+}
+
 
 def select_strategies(
     strategies: dict[str, object],
     strategy_ids: list[str] | None,
 ) -> dict[str, object]:
     if not strategy_ids:
-        defaults = {key: value for key, value in strategies.items() if value.default_enabled}
-        return defaults or strategies
-    unknown_ids = [strategy_id for strategy_id in strategy_ids if strategy_id not in strategies]
+        return strategies
+    filtered_ids = [strategy_id for strategy_id in strategy_ids if strategy_id not in RETIRED_STRATEGY_IDS]
+    if not filtered_ids:
+        return strategies
+    unknown_ids = [strategy_id for strategy_id in filtered_ids if strategy_id not in strategies]
     if unknown_ids:
         raise ValueError(f"Unknown strategies: {', '.join(unknown_ids)}")
-    return {strategy_id: strategies[strategy_id] for strategy_id in strategy_ids}
+    return {strategy_id: strategies[strategy_id] for strategy_id in filtered_ids}
 
 
 def primary_strategies(
@@ -49,6 +63,9 @@ def validate_request(
     issue_parallelism: int,
     dialogue_rounds: int,
     graph_mode: str,
+    runtime_mode: str,
+    warmup_size: int,
+    budget_yuan: int,
 ) -> None:
     if evaluation_size <= 0:
         raise ValueError("evaluation_size must be greater than 0")
@@ -68,6 +85,12 @@ def validate_request(
         raise ValueError(f"agent_dialogue_rounds must be between 0 and {MAX_AGENT_DIALOGUE_ROUNDS}")
     if graph_mode not in GRAPH_MODES:
         raise ValueError(f"graph_mode must be one of: {', '.join(GRAPH_MODES)}")
+    if runtime_mode not in RUNTIME_MODES:
+        raise ValueError(f"runtime_mode must be one of: {', '.join(RUNTIME_MODES)}")
+    if warmup_size < 0:
+        raise ValueError("warmup_size must be greater than or equal to 0")
+    if budget_yuan < MIN_BUDGET_YUAN or budget_yuan > MAX_BUDGET_YUAN:
+        raise ValueError(f"budget_yuan must be between {MIN_BUDGET_YUAN} and {MAX_BUDGET_YUAN}")
 
 
 def validate_dataset(
@@ -88,5 +111,7 @@ def validate_dataset(
     if available_history < minimum_history:
         required_total = minimum_history + total_window
         raise ValueError(f"Backtest needs at least {required_total} completed draws")
+    if any(strategy.group == SOCIAL_GROUP for strategy in strategies.values()) and not primary:
+        raise ValueError("Social strategies require at least one primary strategy")
     if judge and not primary:
         raise ValueError("Judge strategies require at least one primary strategy")

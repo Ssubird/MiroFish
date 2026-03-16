@@ -4,6 +4,9 @@
     <nav class="navbar">
       <div class="nav-brand">MIROFISH</div>
       <div class="nav-links">
+        <button class="lottery-link" @click="openLotteryLab">
+          紫微选号实验
+        </button>
         <a href="https://github.com/666ghj/MiroFish" target="_blank" class="github-link">
           访问我们的Github主页 <span class="arrow">↗</span>
         </a>
@@ -32,7 +35,14 @@
               让未来在 Agent 群中预演，让决策在百战后胜出<span class="blinking-cursor">_</span>
             </p>
           </div>
-           
+          <div class="local-lab-box">
+            <div>
+              <div class="local-lab-title">Local Workspace Mode</div>
+              <div class="local-lab-desc">紫微斗数与快乐8数据已装入工作区，无需上传，直接看回测和选号过程。</div>
+            </div>
+            <button class="local-lab-btn" @click="openLotteryLab">进入实验台</button>
+          </div>
+          
           <div class="decoration-square"></div>
         </div>
         
@@ -303,6 +313,10 @@ const startSimulation = () => {
     })
   })
 }
+
+const openLotteryLab = () => {
+  router.push({ name: 'LotteryLab' })
+}
 </script>
 
 <style scoped>
@@ -351,6 +365,23 @@ const startSimulation = () => {
 .nav-links {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+.lottery-link {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: transparent;
+  color: var(--white);
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.2s, background 0.2s, color 0.2s;
+}
+
+.lottery-link:hover {
+  background: var(--white);
+  color: var(--black);
 }
 
 .github-link {
@@ -476,6 +507,42 @@ const startSimulation = () => {
   border-left: 3px solid var(--orange);
   padding-left: 15px;
   margin-top: 20px;
+}
+
+.local-lab-box {
+  border: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px 20px;
+  max-width: 640px;
+  margin-bottom: 28px;
+  background: linear-gradient(135deg, rgba(255, 69, 0, 0.06), rgba(0, 0, 0, 0.02));
+}
+
+.local-lab-title {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  color: var(--orange);
+  margin-bottom: 6px;
+}
+
+.local-lab-desc {
+  color: var(--gray-text);
+  line-height: 1.6;
+}
+
+.local-lab-btn {
+  border: 1px solid var(--black);
+  background: var(--black);
+  color: var(--white);
+  padding: 10px 14px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .blinking-cursor {

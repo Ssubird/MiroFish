@@ -8,7 +8,6 @@ from .models import PredictionContext
 
 
 KNOWLEDGE_LIMIT = 3
-PROMPT_LIMIT = 1
 REPORT_LIMIT = 2
 CHART_LIMIT = 2
 EXCERPT_CHARS = 900
@@ -32,8 +31,6 @@ class KnowledgeContextBuilder:
     def build(self, context: PredictionContext) -> list[KnowledgeSnippet]:
         snippets = []
         snippets.extend(self._document_snippets(context, "knowledge", KNOWLEDGE_LIMIT))
-        snippets.extend(self._document_snippets(context, "prompt", PROMPT_LIMIT))
-        snippets.extend(self._document_snippets(context, "report", REPORT_LIMIT))
         snippets.extend(self._chart_snippets(context))
         snippets.append(self._graph_snippet(context))
         return snippets

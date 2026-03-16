@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections import Counter
 from statistics import fmean, pstdev
 
+from .happy8_rules import ticket_payout as happy8_ticket_payout
 
 SUPPORTED_ROI_PICK_SIZE = 5
 ROI_TICKET_COST_YUAN = 2
-ROI_PAYOUT_BY_HITS = {3: 3, 4: 20, 5: 1000}
 ROI_FLOOR = -1.0
 ROI_CAP = 3.0
 NEUTRAL_ROI_SCORE = 0.5
@@ -77,9 +77,7 @@ def objective_sort_key(item: dict[str, object]) -> tuple[float, float, float, st
 
 
 def ticket_payout(pick_size: int, hits: int) -> int:
-    if pick_size != SUPPORTED_ROI_PICK_SIZE:
-        return 0
-    return ROI_PAYOUT_BY_HITS.get(hits, 0)
+    return happy8_ticket_payout(pick_size, hits)
 
 
 def _pick_size(issues: list[dict[str, object]]) -> int:

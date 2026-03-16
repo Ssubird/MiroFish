@@ -33,9 +33,9 @@ class PurchaseRole:
 
 
 PURCHASE_ROLES = (
-    PurchaseRole("budget_guard", "LLM-Budget-Guard", "Protect the bankroll. Prefer concentrated tickets or small dan_tuo plans."),
-    PurchaseRole("coverage_builder", "LLM-Coverage-Builder", "Use the main 5 numbers and the 3 alternates to maximize structured coverage."),
-    PurchaseRole("upside_hunter", "LLM-Upside-Hunter", "Seek asymmetric upside. Concentrate when evidence is strong and avoid timid averaging."),
+    PurchaseRole("budget_guard", "LLM-Budget-Guard", "Protect the bankroll. Compare play sizes and avoid wasting the budget on lazy repeated singles."),
+    PurchaseRole("coverage_builder", "LLM-Coverage-Builder", "Use the main 5 numbers and the 3 alternates to maximize structured coverage, including mixed portfolios."),
+    PurchaseRole("upside_hunter", "LLM-Upside-Hunter", "Seek asymmetric upside across play sizes, structures, and concentrated conviction bets."),
 )
 
 
@@ -150,7 +150,7 @@ class PurchaseDiscussionService:
             [
                 f"Role: {role.display_name}",
                 f"Mandate: {role.mandate}",
-                "Return one concrete plan. You may use tickets, wheel, or dan_tuo.",
+                "Return one concrete plan. You may use tickets, wheel, dan_tuo, or a mixed portfolio under budget.",
                 self._plan_schema(),
             ]
         )
@@ -179,7 +179,7 @@ class PurchaseDiscussionService:
                 "You are the chair of the purchase committee.",
                 f"Final Proposals:\n{purchase_proposal_block(proposals)}",
                 f"Discussion Trace:\n{purchase_dialogue_block(discussion_trace)}",
-                "Choose or synthesize the strongest plan under the fixed 50 yuan budget.",
+                "Choose or synthesize the strongest executable plan under the fixed budget. Mixed portfolios are allowed.",
                 self._plan_schema(),
             ]
         )
@@ -191,8 +191,9 @@ class PurchaseDiscussionService:
             f"Budget: {self.budget_yuan} yuan; unit ticket cost: {self.ticket_cost_yuan} yuan; max tickets: {self.max_tickets}",
             f"Primary Prediction (fixed one ticket): {list(request.ensemble_numbers)}",
             f"Alternate Numbers (fixed 3): {list(request.alternate_numbers)}",
-            "Primary prediction is fixed to one 5-number ticket. Only the purchase committee may expand it into tickets / wheel / dan_tuo.",
+            "Primary prediction is fixed to one 5-number ticket. Only the purchase committee may expand it into tickets / wheel / dan_tuo / portfolio.",
             "Use the committee discussion to decide how to spend the 50 yuan budget, not just the strongest single ticket.",
+            "You may mix multiple play sizes and structures as long as total cost stays within budget.",
             "Backtest Performance:",
             performance_block(request.performance),
             "World State:",
@@ -235,19 +236,24 @@ class PurchaseDiscussionService:
 
     def _plan_schema(self) -> str:
         return (
-            'Return JSON only: {"plan_style":"...", "plan_type":"tickets|wheel|dan_tuo", '
-            '"trusted_strategy_ids":["..."], "tickets":[[...]], "wheel_numbers":[...], '
-            '"banker_numbers":[...], "drag_numbers":[...], "primary_ticket":[...], '
-            '"core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], '
+            'Return JSON only: {"plan_style":"...", "plan_type":"tickets|wheel|dan_tuo|portfolio", '
+            '"play_size":3, "play_size_review":{"3":"...","4":"...","5":"...","6":"..."}, '
+            '"chosen_edge":"...", "trusted_strategy_ids":["..."], "tickets":[[...]], '
+            '"wheel_numbers":[...], "banker_numbers":[...], "drag_numbers":[...], '
+            '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":3,"tickets":[[...]],'
+            '"wheel_numbers":[...],"banker_numbers":[...],"drag_numbers":[...],"primary_ticket":[...],"comment":"...","rationale":"..."}], '
+            '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], '
             '"focus":["..."], "rationale":"..."}'
         )
 
     def _discussion_schema(self) -> str:
         return (
             'Return JSON only: {"comment":"...", "support_role_ids":["..."], "plan_style":"...", '
-            '"plan_type":"tickets|wheel|dan_tuo", "trusted_strategy_ids":["..."], "tickets":[[...]], '
-            '"wheel_numbers":[...], "banker_numbers":[...], "drag_numbers":[...], "primary_ticket":[...], '
-            '"core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], "focus":["..."], "rationale":"..."}'
+            '"plan_type":"tickets|wheel|dan_tuo|portfolio", "play_size":3, '
+            '"play_size_review":{"3":"...","4":"...","5":"...","6":"..."}, "chosen_edge":"...", '
+            '"trusted_strategy_ids":["..."], "tickets":[[...]], "wheel_numbers":[...], '
+            '"banker_numbers":[...], "drag_numbers":[...], "portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":3}], '
+            '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], "focus":["..."], "rationale":"..."}'
         )
 
     def _discussion_note(self, proposal: dict[str, object], round_index: int) -> dict[str, object]:

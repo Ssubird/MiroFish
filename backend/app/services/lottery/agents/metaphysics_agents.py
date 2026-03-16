@@ -45,32 +45,6 @@ def _chart_terms(chart: ChartProfile | None, draw) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
-class MutagenSimilarityAgent(StrategyAgent):
-    window: int
-
-    def predict(self, context: PredictionContext, pick_size: int) -> StrategyPrediction:
-        self.ensure_history(context)
-        segment = recent_history(context.history_draws, self.window)
-        scores = {number: 0.0 for number in range(1, 81)}
-        total = len(segment)
-        for index, draw in enumerate(segment, start=1):
-            similarity = energy_similarity(draw, context.target_draw)
-            if similarity <= 0:
-                continue
-            factor = 1.0 + (index / total) * 0.35
-            for number in draw.numbers:
-                scores[number] += similarity * factor
-        return StrategyPrediction(
-            strategy_id=self.strategy_id,
-            display_name=self.display_name,
-            group=self.group,
-            numbers=select_numbers(scores, pick_size),
-            rationale=f"匹配最近 {self.window} 期与目标期四化和干支接近的历史样本。",
-            ranked_scores=rank_scores(scores, pick_size),
-        )
-
-
-@dataclass(frozen=True)
 class StemBranchMatchAgent(StrategyAgent):
     window: int
 
@@ -110,8 +84,7 @@ class GraphResonanceAgent(StrategyAgent):
         scores = {number: 0.0 for number in range(1, 81)}
         highlights = context.graph_snapshot.highlights[:GRAPH_HIGHLIGHT_LIMIT]
         for draw in segment:
-            terms = _terms_for_draw(draw)
-            resonance = _graph_weight(context, terms)
+            resonance = _graph_weight(context, _terms_for_draw(draw))
             similarity = energy_similarity(draw, context.target_draw)
             total_score = resonance * 0.25 + similarity * 1.8
             if total_score <= 0:
@@ -163,7 +136,6 @@ class ChartSignatureAgent(StrategyAgent):
 
 def build_metaphysics_agents(chart_count: int) -> dict[str, StrategyAgent]:
     agents = [
-        MutagenSimilarityAgent("mutagen_240", "四化相似-240期", "用四化与干支相似度检索历史样本。", 240, GROUP, window=240),
         StemBranchMatchAgent("stem_branch_240", "干支匹配-240期", "用目标期干支映射相似历史样本。", 240, GROUP, window=240),
         GraphResonanceAgent("graph_resonance_180", "图谱共振-180期", "让紫微书与命盘图谱参与号码打分。", 180, GROUP, window=180),
     ]

@@ -188,9 +188,16 @@ class DialogueCoordinator:
         round_index: int,
         parallelism: int,
     ) -> tuple[dict[str, StrategyPrediction], list[dict[str, object]]]:
+        if parallelism <= 1 or len(participants) <= 1:
+            return self._sequential_round(
+                context,
+                participants,
+                predictions,
+                history,
+                pick_size,
+                round_index,
+            )
         tasks = self._round_tasks(context, participants, predictions, history, pick_size, round_index)
-        if parallelism <= 1 or len(tasks) <= 1:
-            return self._sequential_round(tasks, predictions)
         return self._parallel_round(tasks, predictions, parallelism)
 
     def _round_tasks(
@@ -217,12 +224,25 @@ class DialogueCoordinator:
 
     def _sequential_round(
         self,
-        tasks: dict[str, RoundTask],
+        context: PredictionContext,
+        participants: dict[str, StrategyAgent],
         predictions: dict[str, StrategyPrediction],
+        history: tuple[dict[str, object], ...],
+        pick_size: int,
+        round_index: int,
     ) -> tuple[dict[str, StrategyPrediction], list[dict[str, object]]]:
         current = dict(predictions)
-        notes = []
-        for strategy_id, task in tasks.items():
+        notes: list[dict[str, object]] = []
+        for strategy_id, strategy in participants.items():
+            task = RoundTask(
+                context=context,
+                strategy=strategy,
+                own_prediction=current[strategy_id],
+                peer_predictions=self._peer_snapshot(current, strategy_id),
+                dialogue_history=tuple([*history, *notes]),
+                pick_size=pick_size,
+                round_index=round_index,
+            )
             next_prediction, note = self._deliberate(task)
             current[strategy_id] = next_prediction
             notes.append(note)

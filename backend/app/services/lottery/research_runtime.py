@@ -14,9 +14,9 @@ from .backtest_support import (
     evaluation_summary,
 )
 from .catalog import build_strategy_catalog
-from .constants import SOCIAL_GROUP, WORLD_WARMUP_ISSUES
+from .constants import SOCIAL_GROUP
 from .context import attach_expert_interviews, attach_peer_predictions, build_prediction_context
-from .document_filters import grounding_documents
+from .document_filters import grounding_documents, prompt_documents
 from .graph_runtime import prediction_graph, workspace_graph
 from .issue_execution import execute_issue_pipeline
 from .performance_summary import build_strategy_performance, performance_rows
@@ -100,7 +100,7 @@ class LotteryResearchRuntime:
             "dataset": dataset_summary(assets),
             "evaluation": evaluation_summary(
                 evaluation_size,
-                WORLD_WARMUP_ISSUES,
+                options.warmup_size,
                 pick_size,
                 strategies,
                 options.request_delay_ms,
@@ -154,7 +154,7 @@ class LotteryResearchRuntime:
             ),
             options.issue_parallelism,
             adaptive_window_required(strategies, options.agent_dialogue_enabled),
-            WORLD_WARMUP_ISSUES,
+            options.warmup_size,
         )
         return WindowBacktest(
             window.issue_results,
@@ -214,6 +214,7 @@ class LotteryResearchRuntime:
             optimization_goal=OPTIMIZATION_GOAL,
             social_state=social_state,
             world_state=world_state,
+            prompt_documents=list(prompt_documents(assets.knowledge_documents)),
         )
 
     def predict_pending(

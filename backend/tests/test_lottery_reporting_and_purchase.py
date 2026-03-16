@@ -7,8 +7,10 @@ from app.services.lottery.models import KnowledgeDocument, PredictionContext, St
 from app.services.lottery.purchase_discussion import PURCHASE_ROLES, PurchaseDiscussionService
 from app.services.lottery.purchase_helpers import clean_numbers
 from app.services.lottery.purchase_plan import PurchasePlanRequest, PurchasePlanService
+from app.services.lottery.purchase_structures import planner_structure
 from app.services.lottery.report_markdown import build_markdown_report
 from app.services.lottery.research_types import WindowBacktest
+from app.services.lottery.world_support import purchase_rule_block, purchase_schema
 
 
 class DummyDiscussionService:
@@ -88,6 +90,17 @@ def test_single_ticket_rule_reserves_expansion_for_purchase_committee():
     assert "exactly one final 5-number ticket" in rule
     assert "purchase committee" in rule
     assert "3 alternate numbers" in rule
+
+
+def test_purchase_prompt_guidance_forces_play_size_comparison():
+    rule_block = purchase_rule_block()
+    schema = purchase_schema()
+
+    assert "Compare play sizes 3/4/5/6" in rule_block
+    assert "Do not lazily spend the whole budget on pick-5 singles" in rule_block
+    assert '"play_size_review"' in schema
+    assert '"chosen_edge"' in schema
+    assert '"portfolio_legs"' in schema
 
 
 def test_purchase_discussion_messages_include_budget_primary_and_alternates():
@@ -199,6 +212,51 @@ def test_purchase_plan_returns_discussion_payload_when_ready(monkeypatch):
     assert plan["discussion_agents"][0]["role_id"] == "budget_guard"
     assert plan["discussion_trace"][0]["role_id"] == "coverage_builder"
     assert plan["plan_type"] == "wheel"
+
+
+def test_planner_structure_supports_pick6_wheel_under_budget():
+    structure = planner_structure(
+        {
+            "plan_type": "wheel",
+            "play_size": 6,
+            "wheel_numbers": [11, 12, 13, 14, 15, 16],
+        },
+        5,
+        10,
+    )
+
+    assert structure.plan_type == "wheel"
+    assert structure.play_size == 6
+    assert len(structure.tickets) == 1
+    assert structure.summary["play_label"] == "选6"
+
+
+def test_planner_structure_supports_multi_leg_portfolio_under_budget():
+    structure = planner_structure(
+        {
+            "plan_type": "portfolio",
+            "portfolio_legs": [
+                {
+                    "plan_type": "tickets",
+                    "play_size": 5,
+                    "tickets": [[11, 12, 13, 14, 15], [11, 12, 13, 14, 16]],
+                },
+                {
+                    "plan_type": "dan_tuo",
+                    "play_size": 4,
+                    "banker_numbers": [21, 22],
+                    "drag_numbers": [23, 24, 25],
+                },
+            ],
+        },
+        5,
+        10,
+    )
+
+    assert structure.plan_type == "portfolio"
+    assert len(structure.tickets) == 5
+    assert len(structure.summary["portfolio_legs"]) == 2
+    assert structure.summary["portfolio_legs"][1]["play_label"] == "选4"
 
 
 def test_markdown_report_contains_purchase_committee_and_discussion():

@@ -19,8 +19,9 @@ SOCIAL_HISTORY_LIMIT = 3
 WORLD_ISSUE_LIMIT = 3
 WORLD_POST_LIMIT = 4
 WORLD_INTERVIEW_LIMIT = 3
-REPORT_KEYWORDS = ("cold", "hot", "hit", "backtest", "review", "roi", "discussion", "objective", "冷号", "热号", "命中", "复盘")
-REPORT_PRIORITY_KEYWORDS = ("cold", "hot", "roi", "hit distribution", "命中分布", "backtest window", "回测窗口", "objective")
+MANUAL_REPORT_NOTE = (
+    "prediction_report.md 仅供人工参考，当前持续世界不会把它喂给 agent、grounding 或购买委员会。"
+)
 
 
 def target_summary(context) -> str:
@@ -67,26 +68,22 @@ def expert_interview_summary(context) -> str:
 
 
 def prompt_summary(context) -> str:
-    prompts = [item for item in context.knowledge_documents if item.kind == "prompt"]
+    prompts = list(getattr(context, "prompt_documents", ()) or ())
+    if not prompts:
+        prompts = [item for item in context.knowledge_documents if item.kind == "prompt"]
     if not prompts:
         return "No dedicated Happy 8 prompt asset."
-    return "\n".join(f"- {item.name}: {_report_excerpt(item.content)}" for item in prompts[:PROMPT_LIMIT])
+    return "\n".join(f"- {item.name}: {_content_excerpt(item.content)}" for item in prompts[:PROMPT_LIMIT])
 
 
 def named_report_summary(context, name: str) -> str:
-    reports = [item for item in context.knowledge_documents if item.kind == "report" and item.name == name]
-    if not reports:
-        return f"Report not found: {name}"
-    ordered = sorted(reports, key=lambda item: str(item.metadata.get("max_visible_period", item.relative_path)), reverse=True)
-    return _report_line(ordered[0])
+    del context
+    return f"{name}: {MANUAL_REPORT_NOTE}"
 
 
 def report_summary(context) -> str:
-    reports = [item for item in context.knowledge_documents if item.kind == "report"]
-    if not reports:
-        return "No external report is visible for this period."
-    ordered = sorted(reports, key=lambda item: str(item.metadata.get("max_visible_period", item.relative_path)), reverse=True)
-    return "\n".join(_report_line(report) for report in ordered[:REPORT_LIMIT])
+    del context
+    return MANUAL_REPORT_NOTE
 
 
 def optimization_goal(context) -> str:
@@ -207,33 +204,17 @@ def _world_interview_lines(raw: object) -> str:
     return " | ".join(lines) or "-"
 
 
-def _report_excerpt(content: str) -> str:
-    priority = []
-    fallback = []
-    for line in content.splitlines():
-        compact = " ".join(line.split())
-        if not compact or compact.startswith(("说明:", "提示:", "|")):
-            continue
-        target = priority if _has_keyword(compact, REPORT_PRIORITY_KEYWORDS) else fallback
-        if _has_keyword(compact, REPORT_KEYWORDS):
-            target.append(compact[:REPORT_LINE_CHARS])
-        if len(priority) >= REPORT_SIGNAL_LIMIT:
-            break
-    matches = (priority + fallback)[:REPORT_SIGNAL_LIMIT]
-    if matches:
-        return " | ".join(matches)
-    return " ".join(content.split())[:REPORT_EXCERPT_CHARS]
-
-
-def _has_keyword(text: str, keywords: tuple[str, ...]) -> bool:
-    lowered = text.lower()
-    return any(keyword.lower() in lowered for keyword in keywords)
-
-
 def _report_line(report) -> str:
     metadata = dict(getattr(report, "metadata", {}) or {})
-    window = f"{metadata.get('effective_period', '-')} < period <= {metadata.get('max_visible_period', '-')}"
-    return f"- {report.name} (visible_window={window}): {_report_excerpt(report.content)}"
+    window = (
+        f"prediction_window={metadata.get('effective_period', '-')}..{metadata.get('max_visible_period', '-')}, "
+        f"historical_after>{metadata.get('max_visible_period', '-')}"
+    )
+    return f"- {report.name} ({window}): {MANUAL_REPORT_NOTE}"
+
+
+def _content_excerpt(content: str) -> str:
+    return " ".join(content.split())[:REPORT_EXCERPT_CHARS]
 
 
 def _world_issue_line(item: dict[str, object]) -> str:

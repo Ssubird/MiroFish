@@ -11,9 +11,8 @@ def report_is_visible(document, target_draw) -> bool:
         return False
     if not _scope_complete(metadata):
         return False
-    if not _period_in_window(
+    if not _period_is_historical(
         str(target_draw.period),
-        str(metadata.get("effective_period", "")).strip(),
         str(metadata.get("max_visible_period", "")).strip(),
     ):
         return False
@@ -31,11 +30,11 @@ def report_scope(document) -> dict[str, object]:
     }
 
 
-def _period_in_window(current_period: str, effective_period: str, max_visible_period: str) -> bool:
-    if not effective_period or not max_visible_period:
+def _period_is_historical(current_period: str, max_visible_period: str) -> bool:
+    if not max_visible_period:
         return False
     current = _parse_period(current_period)
-    return _parse_period(effective_period) < current <= _parse_period(max_visible_period)
+    return current > _parse_period(max_visible_period)
 
 
 def _parse_period(value: str) -> int:

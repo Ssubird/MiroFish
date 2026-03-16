@@ -33,6 +33,11 @@ class LLMRunOptions:
     agent_dialogue_rounds: int
     graph_mode: str
     zep_graph_id: str | None
+    runtime_mode: str
+    warmup_size: int
+    live_interview_enabled: bool
+    budget_yuan: int
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)

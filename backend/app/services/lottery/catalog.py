@@ -8,11 +8,8 @@ from ...config import Config
 from .agents import (
     build_data_agents,
     build_hybrid_agents,
-    build_judge_agents,
     build_llm_agents,
     build_metaphysics_agents,
-    build_social_agents,
-    build_specialist_agents,
 )
 from .constants import (
     DEFAULT_AGENT_DIALOGUE_ENABLED,
@@ -30,9 +27,6 @@ def build_strategy_catalog(chart_count: int = 0) -> dict[str, object]:
     strategies.update(build_metaphysics_agents(chart_count))
     strategies.update(build_hybrid_agents())
     strategies.update(build_llm_agents())
-    strategies.update(build_social_agents())
-    strategies.update(build_specialist_agents())
-    strategies.update(build_judge_agents())
     return strategies
 
 
@@ -60,5 +54,9 @@ def build_llm_status() -> dict[str, object]:
         "default_issue_parallelism": DEFAULT_ISSUE_PARALLELISM,
         "default_agent_dialogue_enabled": DEFAULT_AGENT_DIALOGUE_ENABLED,
         "default_agent_dialogue_rounds": DEFAULT_AGENT_DIALOGUE_ROUNDS,
-        "note": "LLM agent 支持多轮对话；主策略先出号，社交组再读榜单和发言做讨论，最后由裁判组收口。",
+        "note": (
+            "Persistent world keeps generator agents only by default: "
+            "data, metaphysics, hybrid, llm_ziwei_graph, and llm_hybrid_panel. "
+            "Social and judge amplifiers are removed."
+        ),
     }

@@ -156,7 +156,7 @@ class PurchasePlanService:
 
     def _structure_payload(self, structure: TicketStructure) -> dict[str, object]:
         payload = dict(structure.summary)
-        if structure.tickets:
+        if structure.tickets and structure.plan_type != "portfolio":
             payload["primary_ticket"] = list(structure.tickets[0])
         return payload
 

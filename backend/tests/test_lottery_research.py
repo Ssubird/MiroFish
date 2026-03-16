@@ -84,13 +84,11 @@ def test_lottery_overview_reads_workspace():
         llm_strategy = next(item for item in overview["available_strategies"] if item["strategy_id"] == "llm_ziwei_graph")
         assert llm_strategy["uses_llm"] is True
         assert llm_strategy["default_enabled"] is False
-        judge_strategy = next(item for item in overview["available_strategies"] if item["strategy_id"] == "consensus_judge")
-        assert judge_strategy["uses_llm"] is True
-        assert judge_strategy["supports_dialogue"] is True
+    assert all(item["group"] not in {"social", "judge"} for item in overview["available_strategies"])
 
 
 def test_lottery_backtest_produces_pending_prediction():
-    strategy_ids = ["hot_50", "cold_50", "miss_120", "momentum_60", "structure_90"]
+    strategy_ids = ["cold_50", "miss_120", "momentum_60", "structure_90"]
     with tempfile.TemporaryDirectory() as temp_dir:
         service = LotteryResearchService(report_writer=LotteryReportWriter(Path(temp_dir)))
         expected_pending = service.build_overview()["pending_target_draw"]["period"]
@@ -108,7 +106,7 @@ def test_lottery_backtest_produces_pending_prediction():
             agent_dialogue_rounds=0,
         )
 
-    assert len(result["leaderboard"]) >= 5
+    assert len(result["leaderboard"]) >= 4
     assert result["evaluation"]["llm_request_delay_ms"] == 2000
     assert result["evaluation"]["llm_model_name"] == "gpt-5"
     assert result["evaluation"]["llm_retry_count"] == 2
@@ -137,7 +135,7 @@ def test_lottery_backtest_produces_pending_prediction():
 def test_kuzu_graph_sync_and_backtest_subset():
     repository = LotteryDataRepository()
     draws = repository.load_draws()
-    subset_draws = [*draws[:75], draws[-1]]
+    subset_draws = [*draws[:140], draws[-1]]
     visible_periods = {draw.period for draw in subset_draws}
     subset_charts = [
         chart
@@ -169,7 +167,7 @@ def test_kuzu_graph_sync_and_backtest_subset():
         result = service.run_backtest(
             evaluation_size=5,
             pick_size=5,
-            strategy_ids=["hot_50", "cold_50"],
+            strategy_ids=["cold_50", "miss_120"],
             graph_mode=KUZU_GRAPH_MODE,
             issue_parallelism=2,
             agent_dialogue_enabled=False,
@@ -237,7 +235,7 @@ def test_dialogue_coordinator_runs_rounds():
     assert result.predictions["dummy"].numbers == (6, 7, 8, 9, 10)
 
 
-def test_prompt_documents_are_excluded_but_reports_are_included_in_llm_grounding():
+def test_prompt_documents_are_excluded_and_reports_are_not_grounding_evidence():
     draw = _draw("2026001", ())
     context = PredictionContext(
         history_draws=(),
@@ -255,10 +253,10 @@ def test_prompt_documents_are_excluded_but_reports_are_included_in_llm_grounding
 
     assert all(item.kind != "prompt" for item in snippets)
     assert any(item.source == "book.md" for item in snippets)
-    assert any(item.source == "report.md" for item in snippets)
+    assert all(item.source != "report.md" for item in snippets)
 
 
-def test_llm_prompt_enforces_single_ticket_and_reads_report():
+def test_llm_prompt_enforces_single_ticket_and_marks_report_manual_only():
     if not Config.LLM_API_KEY:
         pytest.skip("LLM not configured")
     agent = build_llm_agents()["llm_ziwei_graph"]
@@ -273,6 +271,7 @@ def test_llm_prompt_enforces_single_ticket_and_reads_report():
 
     messages = agent._build_messages(context, KnowledgeContextBuilder().build(context), 5)
 
-    assert "最终只允许输出 5 个最终下注号码" in messages[1]["content"]
-    assert "不能提交候选号池或多方案" in messages[0]["content"]
-    assert "外部预测/复盘报告" in messages[1]["content"]
+    assert "exactly one final 5-number ticket" in messages[1]["content"]
+    assert "Do not output pools, wheel, dan_tuo" in messages[1]["content"]
+    assert "prediction_report.md 仅供人工参考" in messages[1]["content"]
+    assert "冷号命中率高" not in messages[1]["content"]

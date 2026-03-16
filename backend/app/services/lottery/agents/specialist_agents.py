@@ -1,4 +1,4 @@
-"""Specialist LLM agents for reports and rule digestion."""
+"""Specialist LLM agents for digesting non-LLM signals."""
 
 from __future__ import annotations
 
@@ -20,15 +20,12 @@ from .llm_support import (
 )
 from .prompt_blocks import (
     expert_interview_summary,
-    named_report_summary,
     optimization_goal,
     performance_summary,
     prompt_summary,
-    report_summary,
     single_ticket_rule,
     social_goal,
     social_memory_summary,
-    target_summary,
     world_summary,
 )
 
@@ -44,7 +41,6 @@ class SpecialistDiscussionAgent(StrategyAgent):
     """Discussion agent with a focused reading mandate."""
 
     specialist_mode: str
-    social_mode: str
 
     kind: ClassVar[str] = "llm"
     uses_llm: ClassVar[bool] = True
@@ -83,7 +79,6 @@ class SpecialistDiscussionAgent(StrategyAgent):
     def _build_messages(self, context: PredictionContext, pick_size: int) -> list[dict[str, str]]:
         user_prompt = "\n".join(
             [
-                target_summary(context),
                 optimization_goal(context),
                 social_goal(),
                 f"世界模拟记忆:\n{world_summary(context)}",
@@ -92,8 +87,7 @@ class SpecialistDiscussionAgent(StrategyAgent):
                 single_ticket_rule(pick_size),
                 f"持续 persona / 社交状态:\n{social_memory_summary(context, self.strategy_id)}",
                 f"历史命中榜单:\n{performance_summary(context)}",
-                f"外部预测/复盘报告:\n{report_summary(context)}",
-                self._specialist_brief(context),
+                f"规则 / 非LLM结论摘要:\n{_rule_summary(context)}",
                 f"当前公开讨论流:\n{social_feed_block(context.peer_predictions, dict(context.strategy_performance))}",
                 self._output_schema(),
             ]
@@ -119,9 +113,9 @@ class SpecialistDiscussionAgent(StrategyAgent):
                 f"强信号采访纪要:\n{expert_interview_summary(context)}",
                 single_ticket_rule(pick_size),
                 f"持续 persona / 社交状态:\n{social_memory_summary(context, self.strategy_id)}",
-                f"你当前帖子号码: {list(own_prediction.numbers)}",
-                f"你当前帖子理由: {own_prediction.rationale}",
-                self._specialist_brief(context),
+                f"你当前号码: {list(own_prediction.numbers)}",
+                f"你当前理由: {own_prediction.rationale}",
+                f"规则 / 非LLM结论摘要:\n{_rule_summary(context)}",
                 f"历史命中榜单:\n{performance_summary(context)}",
                 f"你读到的公开讨论流:\n{social_feed_block(context.peer_predictions, dict(context.strategy_performance))}",
                 f"其他 specialist/social 发言:\n{social_feed_block(peer_predictions, dict(context.strategy_performance))}",
@@ -130,11 +124,6 @@ class SpecialistDiscussionAgent(StrategyAgent):
             ]
         )
         return [{"role": "system", "content": self._dialogue_prompt(pick_size)}, {"role": "user", "content": user_prompt}]
-
-    def _specialist_brief(self, context: PredictionContext) -> str:
-        if self.specialist_mode == "report":
-            return f"你必须重点阅读 prediction_report.md:\n{named_report_summary(context, 'prediction_report.md')}"
-        return f"你必须重点消化规则/非LLM结论:\n{_rule_summary(context)}"
 
     def _to_prediction(
         self,
@@ -171,7 +160,6 @@ class SpecialistDiscussionAgent(StrategyAgent):
                 "model": llm.model,
                 "base_url": llm.base_url,
                 "specialist_mode": self.specialist_mode,
-                "social_mode": self.social_mode,
                 "focus": response.get("focus", []),
                 "post": str(response.get("post", "")).strip(),
                 "trusted_strategy_ids": _trusted_ids(response, context),
@@ -196,7 +184,14 @@ class SpecialistDiscussionAgent(StrategyAgent):
         comment = str(response.get("comment", "")).strip()
         metadata = dict(updated.metadata or {})
         history = list(metadata.get("dialogue_history", []))
-        history.append({"round": round_index, "comment": comment, "numbers_before": list(previous.numbers), "numbers_after": list(updated.numbers)})
+        history.append(
+            {
+                "round": round_index,
+                "comment": comment,
+                "numbers_before": list(previous.numbers),
+                "numbers_after": list(updated.numbers),
+            }
+        )
         metadata["dialogue_history"] = history
         metadata["latest_dialogue_comment"] = comment
         metadata["dialogue_user_prompt_preview"] = preview_prompt(messages[1]["content"])
@@ -215,11 +210,10 @@ class SpecialistDiscussionAgent(StrategyAgent):
         return revised, note
 
     def _system_prompt(self, pick_size: int) -> str:
-        role = "报告观察员" if self.specialist_mode == "report" else "规则解读员"
         return (
-            f"你是选号社交世界中的 {role} LLM。"
-            "你必须先读世界记忆、专用提示词、强信号采访和公共讨论，再给出一注最终号码。"
-            "你不是旁观者，必须把自己的结论发进公共场。"
+            "你是选号社交世界中的规则解读员。"
+            "你必须先读世界记忆、专用提示词、强信号采访和公开讨论，再给出一注最终号码。"
+            "你的职责是把规则/非LLM结论翻译成公共论证，而不是机械重复原始规则。"
             f"numbers 必须是 {pick_size} 个 1-80 的不重复整数。"
         )
 
@@ -227,7 +221,7 @@ class SpecialistDiscussionAgent(StrategyAgent):
         return (
             "你正在和其他角色讨论最终选号。"
             "先引用别人，再明确你是否修正自己。"
-            "保持 specialist 立场，不要退化成平均主义。"
+            "保持 rule interpreter 立场，不要退化成平均主义。"
             f"numbers 必须是 {pick_size} 个 1-80 的不重复整数。"
         )
 
@@ -246,7 +240,7 @@ def _rule_summary(context: PredictionContext) -> str:
         if str(item.get("kind", "")) != "llm"
     }
     if not rules:
-        return "暂无规则/非LLM候选。"
+        return "暂无规则 / 非LLM候选。"
     ordered = sorted(rules.items(), key=lambda item: (int(performance.get(item[0], {}).get("rank", 999)), item[0]))
     return social_feed_block({key: value for key, value in ordered[:RULE_LIMIT]}, performance)
 
@@ -268,24 +262,12 @@ def _trusted_ids(response: dict[str, object], context: PredictionContext) -> lis
 def build_specialist_agents() -> dict[str, StrategyAgent]:
     if not Config.LLM_API_KEY:
         return {}
-    agents = (
-        SpecialistDiscussionAgent(
-            "report_reader_feed",
-            "LLM-报告观察员",
-            "重点阅读 prediction_report.md，再把结论带入公共讨论。",
-            36,
-            GROUP,
-            specialist_mode="report",
-            social_mode="report",
-        ),
-        SpecialistDiscussionAgent(
-            "rule_analyst_feed",
-            "LLM-规则解读员",
-            "重点阅读规则/非LLM结论，再把提炼后的观点带入公共讨论。",
-            36,
-            GROUP,
-            specialist_mode="rules",
-            social_mode="rules",
-        ),
+    agent = SpecialistDiscussionAgent(
+        "rule_analyst_feed",
+        "LLM-规则解读员",
+        "重点阅读规则 / 非LLM结论，再把提炼后的观点带入公共讨论。",
+        36,
+        GROUP,
+        specialist_mode="rules",
     )
-    return {agent.strategy_id: agent for agent in agents}
+    return {agent.strategy_id: agent}
