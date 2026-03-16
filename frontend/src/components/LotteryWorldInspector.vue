@@ -18,35 +18,39 @@
       <article class="summary-card"><span>模型</span><strong>{{ activeModelName || '-' }}</strong></article>
     </div>
 
-    <article class="section-card focus-card">
+    <article class="section-card focus-card" :class="{ 'is-active': selectedGraphNode }">
       <div class="section-head">
         <h3>选中节点</h3>
         <span>{{ selectedGraphNode?.label || '-' }}</span>
       </div>
-      <p v-if="!selectedGraphNode" class="muted">点击左侧世界图节点后，这里会显示摘要、来源和号码。</p>
+      <p v-if="!selectedGraphNode" class="muted">点击左侧图表节点后，此处将自动显示节点详情。</p>
       <template v-else>
         <div class="chip-row">
           <span class="chip">{{ nodeTypeLabel(selectedGraphNode.node_type) }}</span>
           <span class="chip">{{ nodeScope(selectedGraphNode) }}</span>
         </div>
-        <p>{{ selectedGraphNode.summary || selectedGraphNode.comment || selectedGraphNode.meta || '-' }}</p>
-        <p class="muted">号码：{{ (selectedGraphNode.numbers || []).join(' / ') || '-' }}</p>
+        <div class="focus-content">
+          <p>{{ selectedGraphNode.summary || selectedGraphNode.comment || selectedGraphNode.meta || '-' }}</p>
+          <div class="focus-meta">号码：{{ (selectedGraphNode.numbers || []).join(' / ') || '-' }}</div>
+        </div>
       </template>
     </article>
 
-    <article class="section-card focus-card">
+    <article class="section-card focus-card" :class="{ 'is-active': selectedNumberDetail }">
       <div class="section-head">
         <h3>选中号码</h3>
         <span>{{ selectedNumberDetail?.number || '-' }}</span>
       </div>
-      <p v-if="!selectedNumberDetail" class="muted">点击下方 1-80 号码板，这里会显示最近 50 期轨迹和讨论提及。</p>
+      <p v-if="!selectedNumberDetail" class="muted">点击底部 1-80 号码板，此处将显示最近轨迹。</p>
       <template v-else>
         <div class="chip-row">
           <span class="chip">出现 {{ selectedNumberDetail.count }} 次</span>
           <span class="chip">讨论 {{ selectedNumberDetail.mention_count }} 次</span>
         </div>
-        <p>最近出现期次：{{ (selectedNumberDetail.periods || []).join(' / ') || '-' }}</p>
-        <p class="muted">高频提及：{{ (selectedNumberDetail.mentioned_by || []).join(' / ') || '-' }}</p>
+        <div class="focus-content">
+          <p>最近出现期次：{{ (selectedNumberDetail.periods || []).join(' / ') || '-' }}</p>
+          <div class="focus-meta">高频提及：{{ (selectedNumberDetail.mentioned_by || []).join(' / ') || '-' }}</div>
+        </div>
       </template>
     </article>
 
@@ -176,26 +180,344 @@ const nodeScope = (node) => {
 </script>
 
 <style scoped>
-.inspector-shell { display: flex; flex-direction: column; gap: 0.95rem; min-width: 0; max-height: calc(100vh - 2rem); overflow: auto; padding: 1.1rem; border-radius: 1.5rem; border: 1px solid rgba(31, 28, 24, 0.1); background: rgba(255, 251, 244, 0.92); box-shadow: 0 18px 42px rgba(29, 27, 25, 0.08); }
-.summary-grid, .stack-grid, .event-list, .form-grid { display: grid; gap: 0.9rem; }
-.summary-grid, .stack-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.inspector-header, .header-actions, .section-head, .chip-row { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
-.inspector-header, .section-head { justify-content: space-between; }
-.summary-card, .section-card, .event-item { display: grid; gap: 0.6rem; align-content: start; min-width: 0; padding: 0.95rem; border-radius: 1rem; border: 1px solid rgba(31, 28, 24, 0.1); background: rgba(255, 255, 255, 0.9); }
-.focus-card { min-height: 8rem; }
-.summary-card strong, .summary-card span, .section-card p, .event-item p, .event-item span, .section-head span, .muted { overflow-wrap: anywhere; word-break: break-word; }
-.summary-card strong, .summary-card span, .section-card p, .event-item p, .event-item span, .eyebrow, .section-head h3, .inspector-header h2 { margin: 0; }
-.section-head span { max-width: 100%; color: #6e675f; text-align: right; }
-.chip-row { justify-content: flex-start; }
-.chip { display: inline-flex; align-items: center; padding: 0.24rem 0.7rem; border-radius: 999px; border: 1px solid rgba(31, 28, 24, 0.12); background: rgba(246, 243, 236, 0.95); }
-.chip.primary, .chip.alt { background: #1d1b19; color: #fff; }
-.ghost-btn, .run-btn, select, textarea { font: inherit; }
-.ghost-btn, .run-btn { border: 1px solid rgba(31, 28, 24, 0.14); border-radius: 999px; padding: 0.56rem 0.95rem; background: rgba(255, 255, 255, 0.9); cursor: pointer; }
-.ghost-btn.danger { color: #8f3434; }
-.run-btn { background: #1d1b19; color: #fff; }
-.field, .form-grid { display: grid; gap: 0.45rem; }
-.field select, .field textarea { width: 100%; border-radius: 0.95rem; border: 1px solid rgba(31, 28, 24, 0.14); padding: 0.8rem 0.9rem; background: rgba(255, 255, 255, 0.94); }
-.event-list { max-height: 16rem; overflow: auto; }
-.eyebrow, .muted, .summary-card span, .event-item span { color: #6e675f; }
-@media (max-width: 960px) { .inspector-shell { max-height: none; overflow: visible; } .summary-grid, .stack-grid { grid-template-columns: 1fr; } }
+.inspector-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+  max-height: calc(100vh - 2.7rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  background: rgba(11, 12, 16, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 240, 255, 0.05);
+  color: #e0e6ed;
+}
+
+/* Custom Scrollbar */
+.inspector-shell::-webkit-scrollbar {
+  width: 6px;
+}
+.inspector-shell::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.inspector-shell::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.2);
+  border-radius: 10px;
+}
+.inspector-shell::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.4);
+}
+
+.summary-grid,
+.stack-grid,
+.event-list,
+.form-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.summary-grid,
+.stack-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inspector-header,
+.header-actions,
+.section-head,
+.chip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.inspector-header,
+.section-head {
+  justify-content: space-between;
+}
+
+.summary-card,
+.section-card,
+.event-item {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+  min-width: 0;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  transition: all 0.3s ease;
+}
+
+.focus-card {
+  min-height: 8rem;
+  border-color: rgba(0, 240, 255, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 240, 255, 0.05) 100%);
+  box-shadow: inset 0 0 15px rgba(0, 240, 255, 0.05);
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.focus-card.is-active {
+  border-color: #00f0ff;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.3), inset 0 0 20px rgba(0, 240, 255, 0.2);
+  background: rgba(0, 240, 255, 0.08);
+  transform: translateY(-2px);
+}
+
+.focus-card.is-active .section-head h3 {
+  color: #00f0ff;
+  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+
+.focus-content {
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.focus-content p {
+  line-height: 1.6;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.focus-meta {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  color: #00f0ff;
+  font-family: monospace;
+  font-size: 0.95rem;
+}
+
+.summary-card:hover,
+.section-card:hover,
+.event-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(0, 240, 255, 0.2);
+}
+
+.summary-card strong,
+.summary-card span,
+.section-card p,
+.event-item p,
+.event-item span,
+.section-head span,
+.muted {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.summary-card strong,
+.summary-card span,
+.section-card p,
+.event-item p,
+.event-item span,
+.eyebrow,
+.section-head h3,
+.inspector-header h2 {
+  margin: 0;
+}
+
+.summary-card strong {
+  display: block;
+  font-size: 1.15rem;
+  color: #fff;
+  margin-top: 0.25rem;
+}
+
+.section-head h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.section-head span {
+  max-width: 100%;
+  color: #00f0ff;
+  text-align: right;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.chip-row {
+  justify-content: flex-start;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #e0e6ed;
+}
+
+.chip.primary {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+}
+
+.chip.alt {
+  background: rgba(176, 32, 240, 0.15);
+  border-color: rgba(176, 32, 240, 0.4);
+  color: #e0a3ff;
+  box-shadow: 0 0 10px rgba(176, 32, 240, 0.2);
+}
+
+.ghost-btn,
+.run-btn,
+select,
+textarea {
+  font: inherit;
+}
+
+.ghost-btn,
+.run-btn {
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.ghost-btn {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #a0b2c6;
+}
+
+.ghost-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.ghost-btn.danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.3);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.ghost-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.2);
+  color: #ff8c8c;
+  box-shadow: 0 0 15px rgba(255, 107, 107, 0.2);
+}
+
+.run-btn {
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  background: rgba(0, 240, 255, 0.1);
+  color: #00f0ff;
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 240, 255, 0.1);
+}
+
+.run-btn:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.2);
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.4), inset 0 0 20px rgba(0, 240, 255, 0.2);
+  transform: translateY(-2px);
+  color: #fff;
+}
+
+.run-btn:disabled,
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field,
+.form-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.field select,
+.field textarea {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.85rem 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  transition: all 0.3s ease;
+  resize: vertical;
+}
+
+.field select:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.event-list {
+  max-height: 18rem;
+  overflow: auto;
+  padding-right: 0.5rem;
+}
+
+.event-list::-webkit-scrollbar {
+  width: 6px;
+}
+.event-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.event-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.2);
+  border-radius: 10px;
+}
+
+.event-item strong {
+  color: #00f0ff;
+  font-size: 1.05rem;
+}
+
+.event-item span {
+  font-size: 0.85rem;
+  color: #8b9bb4;
+}
+
+.event-item p {
+  color: #e0e6ed;
+  line-height: 1.5;
+}
+
+.eyebrow,
+.muted,
+.summary-card span,
+.event-item span {
+  color: #8b9bb4;
+}
+
+.inspector-header h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 960px) {
+  .inspector-shell {
+    max-height: none;
+    overflow: visible;
+  }
+  .summary-grid,
+  .stack-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

@@ -56,19 +56,22 @@ function heatClass(count) {
 <style scoped>
 .board-shell {
   display: grid;
-  gap: 1rem;
-  padding: 1.15rem;
-  border-radius: 1.4rem;
-  border: 1px solid rgba(31, 28, 24, 0.1);
-  background: rgba(255, 251, 244, 0.92);
-  box-shadow: 0 18px 40px rgba(29, 27, 25, 0.08);
+  gap: 1.25rem;
+  padding: 1.25rem;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  background: rgba(11, 12, 16, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 240, 255, 0.05);
+  color: #e0e6ed;
 }
 
 .board-header,
 .summary-row,
 .board-range {
   display: flex;
-  gap: 0.8rem;
+  gap: 1rem;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
@@ -77,7 +80,7 @@ function heatClass(count) {
 .eyebrow,
 .summary-row,
 .board-range {
-  color: #6e675f;
+  color: #8b9bb4;
 }
 
 .eyebrow,
@@ -85,47 +88,114 @@ function heatClass(count) {
   margin: 0;
 }
 
+.board-header h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.board-range span:nth-child(2) {
+  color: #00f0ff;
+}
+
+.summary-row {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 0.95rem;
+}
+
+.summary-row span:first-child {
+  color: #ff6b6b;
+}
+
+.summary-row span:last-child {
+  color: #00f0ff;
+}
+
 .number-grid {
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 0.65rem;
+  gap: 0.75rem;
 }
 
 .number-card {
   display: grid;
-  gap: 0.2rem;
-  padding: 0.7rem 0.4rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(31, 28, 24, 0.12);
-  background: rgba(255, 255, 255, 0.92);
+  gap: 0.25rem;
+  padding: 0.75rem 0.4rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.4);
   cursor: pointer;
   font: inherit;
-  color: #1d1b19;
+  color: #e0e6ed;
+  transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.number-card:hover {
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .number-card strong {
-  font-size: 1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
 }
 
 .number-card small {
-  color: #6e675f;
+  color: #8b9bb4;
+  font-size: 0.75rem;
 }
 
 .number-card.hot {
-  background: rgba(205, 92, 66, 0.12);
+  background: rgba(255, 60, 60, 0.15);
+  border-color: rgba(255, 60, 60, 0.4);
+  color: #ff8c8c;
 }
+.number-card.hot:hover {
+  box-shadow: 0 8px 20px rgba(255, 60, 60, 0.3);
+  border-color: #ff3c3c;
+}
+.number-card.hot strong { color: #ff3c3c; text-shadow: 0 0 10px rgba(255, 60, 60, 0.5); }
 
 .number-card.warm {
-  background: rgba(210, 162, 55, 0.14);
+  background: rgba(255, 180, 0, 0.15);
+  border-color: rgba(255, 180, 0, 0.4);
+  color: #ffd700;
 }
+.number-card.warm:hover {
+  box-shadow: 0 8px 20px rgba(255, 180, 0, 0.2);
+}
+.number-card.warm strong { color: #ffd700; text-shadow: 0 0 10px rgba(255, 180, 0, 0.5); }
 
 .number-card.cold {
-  background: rgba(71, 128, 191, 0.12);
+  background: rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.3);
+  color: #80f8ff;
 }
+.number-card.cold:hover {
+  box-shadow: 0 8px 20px rgba(0, 240, 255, 0.2);
+}
+.number-card.cold strong { color: #00f0ff; text-shadow: 0 0 10px rgba(0, 240, 255, 0.5); }
 
 .number-card.selected {
-  border-color: rgba(24, 22, 19, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(24, 22, 19, 0.18);
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+  transform: scale(1.1);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.6), inset 0 0 10px rgba(0, 0, 0, 0.2);
+  z-index: 2;
+}
+.number-card.selected strong {
+  text-shadow: none;
+  color: #000;
+}
+.number-card.selected small {
+  color: #444;
 }
 
 @media (max-width: 980px) {

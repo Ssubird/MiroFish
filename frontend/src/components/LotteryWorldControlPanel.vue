@@ -112,15 +112,18 @@ defineEmits([
 .field-grid,
 .strategy-grid {
   display: grid;
-  gap: 0.95rem;
+  gap: 1rem;
 }
 
 .control-shell {
-  padding: 1.1rem;
+  padding: 1.25rem;
   border-radius: 1.5rem;
-  border: 1px solid rgba(31, 28, 24, 0.1);
-  background: rgba(255, 251, 244, 0.92);
-  box-shadow: 0 20px 48px rgba(29, 27, 25, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  background: rgba(11, 12, 16, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 240, 255, 0.05);
+  color: #e0e6ed;
 }
 
 .control-header,
@@ -139,16 +142,24 @@ defineEmits([
 
 .summary-card,
 .strategy-card {
-  padding: 0.9rem;
+  padding: 1rem;
   border-radius: 1rem;
-  border: 1px solid rgba(31, 28, 24, 0.1);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  transition: all 0.3s ease;
+}
+
+.summary-card:hover,
+.strategy-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(0, 240, 255, 0.2);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
 }
 
 .field,
 .toggle-field {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
 .toggle-field {
@@ -164,37 +175,111 @@ select {
 
 .run-btn,
 .ghost-btn {
-  border: 1px solid rgba(31, 28, 24, 0.14);
   border-radius: 999px;
-  padding: 0.6rem 1rem;
-  background: rgba(255, 255, 255, 0.9);
+  padding: 0.6rem 1.2rem;
   cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  font-weight: 600;
+}
+
+.ghost-btn {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #a0b2c6;
+}
+
+.ghost-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .run-btn {
-  background: #1d1b19;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  background: rgba(0, 240, 255, 0.1);
+  color: #00f0ff;
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 240, 255, 0.1);
+}
+
+.run-btn:hover:not(:disabled) {
+  background: rgba(0, 240, 255, 0.2);
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.4), inset 0 0 20px rgba(0, 240, 255, 0.2);
+  transform: translateY(-2px);
   color: #fff;
+}
+
+.run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #8b9bb4;
+  box-shadow: none;
 }
 
 .field input,
 .field select {
   width: 100%;
-  border-radius: 0.95rem;
-  border: 1px solid rgba(31, 28, 24, 0.14);
-  padding: 0.85rem 0.95rem;
-  background: rgba(255, 255, 255, 0.94);
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.85rem 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  transition: all 0.3s ease;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .strategy-grid {
   grid-template-columns: 1fr;
   max-height: 36rem;
   overflow: auto;
+  padding-right: 0.5rem;
+}
+
+/* Custom Scrollbar */
+.strategy-grid::-webkit-scrollbar {
+  width: 6px;
+}
+.strategy-grid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+}
+.strategy-grid::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.2);
+  border-radius: 10px;
+}
+.strategy-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.4);
 }
 
 .strategy-card {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.85rem;
   align-items: start;
+  cursor: pointer;
+}
+
+.strategy-card input[type="checkbox"] {
+  margin-top: 0.25rem;
+  accent-color: #00f0ff;
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.strategy-card input[type="checkbox"]:checked + div strong {
+  color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
 }
 
 .eyebrow,
@@ -202,13 +287,28 @@ select {
 .summary-card span,
 .strategy-card p,
 .muted {
-  color: #6e675f;
+  color: #8b9bb4;
   margin: 0;
+}
+
+.summary-card strong,
+.strategy-card strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 1.1rem;
+  color: #fff;
 }
 
 .eyebrow,
 .control-header h2 {
   margin: 0;
+}
+
+.control-header h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 960px) {
