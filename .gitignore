@@ -58,3 +58,19 @@ backend/uploads/
 
 # Docker 数据
 data/
+
+# Local lottery workspace artifacts
+/openapi_letta.json
+/backend/openapi_letta.json
+/backend/pytest-*.txt
+
+/ziweidoushu/data/
+/ziweidoushu/knowledge/
+/ziweidoushu/reports/
+/ziweidoushu/.world_state/
+/ziweidoushu/.letta_runtime_debug/
+/ziweidoushu/.letta_runtime_debug2/
+/ziweidoushu/.letta_runtime_test/
+/ziweidoushu/.kuzu_graph
+/ziweidoushu/.kuzu_graph_state.json
+/ziweidoushu/*.md
