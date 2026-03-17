@@ -18,7 +18,7 @@ from .backtest_support import (
     ensemble_numbers,
     evaluation_summary,
 )
-from .constants import PRIMARY_GROUPS, WORLD_V1_RUNTIME_MODE
+from .constants import PRIMARY_GROUPS, WORLD_V2_MARKET_RUNTIME_MODE, WORLD_V2_PHASES
 from .context import build_prediction_context
 from .document_filters import grounding_documents, manual_reference_documents, prompt_documents
 from .execution import run_strategy_stage
@@ -53,19 +53,11 @@ from .world_support import (
     rule_digest,
 )
 from .world_stats import build_recent_draw_stats
+from .bettor_personas import build_bettor_personas
 from ...config import reload_project_env
 
 
-ROUND_PHASES = (
-    "opening",
-    "rule_interpretation",
-    "public_debate",
-    "judge_synthesis",
-    "purchase_committee",
-    "await_result",
-    "settlement",
-    "postmortem",
-)
+ROUND_PHASES = WORLD_V2_PHASES
 SHARED_BLOCKS = (
     "world_goal",
     "current_issue",
@@ -90,8 +82,8 @@ WORLD_ROLES = (
 )
 
 
-class LotteryWorldRuntime:
-    """Run the persistent `world_v1` lottery session."""
+class LotteryWorldV2Runtime:
+    """Run the persistent `world_v2_market` lottery session."""
 
     def __init__(
         self,
@@ -246,10 +238,8 @@ class LotteryWorldRuntime:
         return {"agent_id": agent_id, "display_name": display_name, "answer": answer}
 
     def _validate_request(self, pick_size: int, issue_parallelism: int) -> None:
-        if pick_size != 5:
-            raise ValueError("world_v1 requires pick_size=5")
         if issue_parallelism != 1:
-            raise ValueError("world_v1 requires issue_parallelism=1")
+            raise ValueError("world_v2_market requires issue_parallelism=1")
 
     def _maybe_settle(self, session, assets, strategies, pick_size: int, options) -> None:
         latest = dict(session.get("latest_prediction", {}))
@@ -267,6 +257,7 @@ class LotteryWorldRuntime:
             return
         self._run_settlement_cycle(session, strategies, actual_draw, pick_size, options)
 
+    
     def _run_prediction_cycle(self, session, assets, strategies, target_draw, pick_size: int, options) -> None:
         session["status"] = "running"
         session["current_period"] = target_draw.period
@@ -276,210 +267,180 @@ class LotteryWorldRuntime:
         context = self._context(list(assets.completed_draws), target_draw, assets, options, performance, session)
         self._ensure_agents(session, strategies, context)
         round_state = self._load_round_state(session, target_draw)
-        opening = self._phase_opening(session, round_state, context, strategies, pick_size, options.parallelism, leaderboard)
-        rule_posts = self._phase_rule_interpretation(session, round_state)
-        revised, interviews, debate_events = self._phase_public_debate(
-            session,
-            round_state,
-            context,
-            opening,
-            performance,
-            pick_size,
-            options,
-            leaderboard,
-        )
-        judge = self._phase_judge(session, round_state, revised, leaderboard)
-        purchase = self._phase_purchase(session, round_state, target_draw.period, judge, options.parallelism)
+        
+        # 1. signal_opening
+        signals = self._phase_signal_opening(session, round_state, context, strategies, pick_size, options.parallelism, leaderboard)
+        
+        # 2. social_propagation
+        social_posts, interviews = self._phase_social_propagation(session, round_state, context, signals, performance, pick_size, options, leaderboard)
+        
+        # 3. market_rerank
+        market_ranks = self._phase_market_rerank(session, round_state, context, signals, social_posts, leaderboard, options.parallelism)
+        
+        # 4. bettor_planning
+        bet_plans = self._phase_bettor_planning(session, round_state, target_draw.period, market_ranks, options.parallelism)
+        
+        # 5. plan_synthesis
+        synthesis = self._phase_plan_synthesis(session, round_state, target_draw.period, bet_plans)
+        
         self._finalize_await_result(
             session,
             round_state,
             target_draw,
-            revised,
-            judge,
-            purchase["plan"],
+            signals,
+            synthesis,
+            bet_plans,
             interviews,
-            debate_events,
-            rule_posts,
+            social_posts,
+            market_ranks,
             leaderboard,
         )
 
-    def _phase_opening(self, session, round_state, context, strategies, pick_size: int, parallelism: int, leaderboard):
-        cached = _deserialize_prediction_map(round_state.get("opening_predictions", {}))
-        if cached and self._can_skip_phase(session, "opening"):
+    def _phase_signal_opening(self, session, round_state, context, strategies, pick_size: int, parallelism: int, leaderboard):
+        cached = _deserialize_prediction_map(round_state.get("signal_predictions", {}))
+        if cached and self._can_skip_phase(session, "signal_opening"):
             return cached
-        self._set_phase(session, "opening")
+        self._set_phase(session, "signal_opening")
         predictions = self._opening_predictions(context, strategies, pick_size, parallelism)
         performance = _leaderboard_performance(leaderboard)
         self._update_shared_memory(session, context, predictions, performance)
         events = self._opening_events(session, context.target_draw.period, predictions)
         self._append_events(session, events)
-        round_state["opening_predictions"] = _serialize_prediction_map(predictions, leaderboard)
-        round_state["opening_events"] = [item.to_dict() for item in events]
+        round_state["signal_predictions"] = _serialize_prediction_map(predictions, leaderboard)
+        round_state["signal_events"] = [item.to_dict() for item in events]
         self._set_issue_summary(
             session,
             period=context.target_draw.period,
-            phase="opening",
+            phase="signal_opening",
             primary_numbers=[],
             alternate_numbers=[],
             top_strategy_numbers={key: list(item.numbers) for key, item in list(predictions.items())[:6]},
         )
         self._save_round_state(session, round_state)
-        self._complete_phase(session, "opening")
+        self._complete_phase(session, "signal_opening")
         return predictions
 
-    def _phase_rule_interpretation(self, session, round_state):
-        cached = list(round_state.get("rule_posts", []))
-        if cached and self._can_skip_phase(session, "rule_interpretation"):
-            return cached
-        self._set_phase(session, "rule_interpretation")
-        digest = session["shared_memory"].get("rule_digest", "").strip() or "No deterministic rule digest yet."
-        events = [
-            self._event(
-                session["session_id"],
-                session.get("current_period") or "-",
-                "rule_interpretation",
-                "rule_summary",
-                "world_runtime",
-                "World Runtime",
-                digest,
-                metadata={"group": "system"},
-            )
-        ]
-        self._append_events(session, events)
-        self._append_public_discussion(session, events, persist=True)
-        round_state["rule_posts"] = [item.to_dict() for item in events]
-        self._set_issue_summary(
-            session,
-            period=session.get("current_period"),
-            phase="rule_interpretation",
-            primary_numbers=[],
-            alternate_numbers=[],
-            trusted_strategy_ids=[],
-        )
-        self._save_round_state(session, round_state)
-        self._complete_phase(session, "rule_interpretation")
-        return round_state["rule_posts"]
-
-    def _phase_public_debate(
-        self,
-        session,
-        round_state,
-        context,
-        opening,
-        performance,
-        pick_size: int,
-        options,
-        leaderboard,
-    ):
-        cached_predictions = _deserialize_prediction_map(round_state.get("debate_predictions", {}))
-        if cached_predictions and self._can_skip_phase(session, "public_debate"):
-            interviews = list(round_state.get("interviews", []))
-            events = list(round_state.get("debate_events", []))
-            return cached_predictions, interviews, events
-        self._set_phase(session, "public_debate")
+    def _phase_social_propagation(self, session, round_state, context, signals, performance, pick_size: int, options, leaderboard):
+        cached_posts = list(round_state.get("social_events", []))
+        if cached_posts and self._can_skip_phase(session, "social_propagation"):
+            return cached_posts, list(round_state.get("interviews", []))
+        self._set_phase(session, "social_propagation")
+        
         interviews = []
         if options.live_interview_enabled:
-            interview_events = self._interviews(session, context, opening, performance, options.parallelism)
+            interview_events = self._interviews(session, context, signals, performance, options.parallelism)
             interviews = [item.to_dict() for item in interview_events]
             self._append_events(session, interview_events)
             self._append_public_discussion(session, interview_events)
-        revised, debate_events = self._debate(
+            
+        # For simplicity, we reuse the debate logic for social agents, filtering for social group
+        revised, social_events = self._debate(
             session,
             context,
-            opening,
+            signals,
             performance,
             pick_size,
             options.agent_dialogue_enabled,
             options.agent_dialogue_rounds,
         )
-        self._append_events(session, debate_events)
-        self._set_issue_summary(
-            session,
-            period=context.target_draw.period,
-            phase="public_debate",
-            primary_numbers=[],
-            alternate_numbers=[],
-            top_strategy_numbers={key: list(item.numbers) for key, item in list(revised.items())[:6]},
-            active_strategy_ids=list(session.get("active_agent_ids", [])),
-        )
+        
+        self._append_events(session, social_events)
         round_state["interviews"] = interviews
-        round_state["debate_predictions"] = _serialize_prediction_map(revised, leaderboard)
-        round_state["debate_events"] = [item.to_dict() for item in debate_events]
-        round_state["active_agent_ids"] = list(session.get("active_agent_ids", []))
+        round_state["social_events"] = [item.to_dict() for item in social_events]
         self._save_round_state(session, round_state)
-        self._complete_phase(session, "public_debate")
-        return revised, interviews, round_state["debate_events"]
+        self._complete_phase(session, "social_propagation")
+        return social_events, interviews
 
-    def _phase_judge(self, session, round_state, predictions, leaderboard):
-        cached = dict(round_state.get("judge_decision", {}))
-        if cached and self._can_skip_phase(session, "judge_synthesis"):
+    def _phase_market_rerank(self, session, round_state, context, signals, social_posts, leaderboard, parallelism: int):
+        cached = list(round_state.get("market_ranks", []))
+        if cached and self._can_skip_phase(session, "market_rerank"):
             return cached
-        self._set_phase(session, "judge_synthesis")
-        judge = self._judge(session, round_state, predictions, leaderboard)
+        self._set_phase(session, "market_rerank")
+        # In this phase, judge agents evaluate the board
+        # Here we mock a generic judge event for now, later we'll plug in the real judge agents
+        judge = self._judge(session, round_state, signals, leaderboard)
         event = self._event(
             session["session_id"],
             session.get("current_period") or "-",
-            "judge_synthesis",
-            "judge_decision",
+            "market_rerank",
+            "market_judge",
             "world_runtime",
-            "World Synthesis",
+            "Market Rerank",
             judge["rationale"],
             tuple(judge["primary_numbers"]),
             {"group": "system", "alternate_numbers": judge["alternate_numbers"]},
         )
         self._append_events(session, [event])
+        ranks = [event.to_dict()]
+        round_state["market_ranks"] = ranks
         round_state["judge_decision"] = judge
-        self._set_issue_summary(
-            session,
-            period=session.get("current_period"),
-            phase="judge_synthesis",
-            primary_numbers=list(judge["primary_numbers"]),
-            alternate_numbers=list(judge["alternate_numbers"]),
-            trusted_strategy_ids=list(judge.get("trusted_strategy_ids", [])),
-        )
         self._save_round_state(session, round_state)
-        self._complete_phase(session, "judge_synthesis")
-        return judge
+        self._complete_phase(session, "market_rerank")
+        return ranks
 
-    def _phase_purchase(self, session, round_state, period: str, judge, parallelism: int):
-        cached = dict(round_state.get("purchase_plan", {}))
-        if cached.get("status") == "ready" and self._can_skip_phase(session, "purchase_committee"):
-            return {"plan": cached, "events": list(round_state.get("purchase_events", []))}
-        self._set_phase(session, "purchase_committee")
+    def _phase_bettor_planning(self, session, round_state, period: str, market_ranks, parallelism: int):
+        if "bet_plans" in round_state and self._can_skip_phase(session, "bettor_planning"):
+            return round_state["bet_plans"]
+        self._set_phase(session, "bettor_planning")
+        
+        # Here bettor personas make their plans. For now, we reuse the old purchase behavior 
+        # as a mock for the bet plans until bettor agents are fully wired up.
+        judge = round_state["judge_decision"]
         purchase = self._purchase(session, period, judge, (), parallelism)
+        
         self._append_events(session, purchase["events"])
-        round_state["purchase_plan"] = purchase["plan"]
+        bet_plans = {"default": purchase["plan"]}
+        round_state["bet_plans"] = bet_plans
         round_state["purchase_events"] = [item.to_dict() for item in purchase["events"]]
+        self._save_round_state(session, round_state)
+        self._complete_phase(session, "bettor_planning")
+        return bet_plans
+
+    def _phase_plan_synthesis(self, session, round_state, period: str, bet_plans):
+        if "plan_synthesis" in round_state and self._can_skip_phase(session, "plan_synthesis"):
+            return round_state["plan_synthesis"]
+        self._set_phase(session, "plan_synthesis")
+        
+        # Aggregate the market
+        synthesis = {
+            "total_market_volume_yuan": sum(plan.get("total_cost_yuan", 0) for plan in bet_plans.values()),
+            "overall_sentiment": "mixed",
+        }
+        round_state["plan_synthesis"] = synthesis
+        
+        # Synthesize a final system decision for backward compatibility in latest_prediction
+        judge = round_state["judge_decision"]
         self._set_issue_summary(
             session,
             period=period,
-            phase="purchase_committee",
+            phase="plan_synthesis",
             primary_numbers=list(judge["primary_numbers"]),
             alternate_numbers=list(judge["alternate_numbers"]),
             trusted_strategy_ids=list(judge.get("trusted_strategy_ids", [])),
-            purchase_plan_type=purchase["plan"].get("plan_type"),
-            purchase_play_size=purchase["plan"].get("play_size"),
-            purchase_ticket_count=purchase["plan"].get("ticket_count"),
+            purchase_plan_type=bet_plans["default"].get("plan_type"),
+            purchase_ticket_count=bet_plans["default"].get("ticket_count"),
         )
+        
         self._save_round_state(session, round_state)
-        self._complete_phase(session, "purchase_committee")
-        return purchase
+        self._complete_phase(session, "plan_synthesis")
+        return synthesis
 
+
+    
     def _finalize_await_result(
         self,
         session,
         round_state,
         target_draw,
-        predictions,
-        judge,
-        purchase_plan,
+        signals,
+        synthesis,
+        bet_plans,
         interviews,
-        debate_events,
-        rule_posts,
+        social_posts,
+        market_ranks,
         leaderboard,
     ) -> None:
-        del rule_posts
-        coordination = _round_trace(round_state, debate_events)
+        coordination = _round_trace(round_state, social_posts)
         session["status"] = "await_result"
         session["current_phase"] = "await_result"
         session["failed_phase"] = None
@@ -487,14 +448,16 @@ class LotteryWorldRuntime:
         session["progress"]["awaiting_period"] = target_draw.period
         round_state["status"] = "await_result"
         round_state["updated_at"] = world_now()
+        
+        judge = round_state.get("judge_decision", {})
         session["latest_prediction"] = {
             "period": target_draw.period,
             "date": target_draw.date,
-            "ensemble_numbers": list(judge["primary_numbers"]),
-            "alternate_numbers": list(judge["alternate_numbers"]),
+            "ensemble_numbers": list(judge.get("primary_numbers", [])),
+            "alternate_numbers": list(judge.get("alternate_numbers", [])),
             "judge_decision": judge,
-            "purchase_plan": purchase_plan,
-            "strategy_predictions": serialized_predictions(predictions, leaderboard),
+            "purchase_plan": bet_plans.get("default", {}),
+            "strategy_predictions": serialized_predictions(signals, leaderboard),
             "performance_context": performance_rows(_leaderboard_performance(leaderboard)),
             "coordination_trace": coordination,
             "live_interviews": interviews,
@@ -504,16 +467,16 @@ class LotteryWorldRuntime:
                 "round_history": session.get("round_history", []),
             },
         }
-        session["latest_purchase_plan"] = purchase_plan
+        session["latest_purchase_plan"] = bet_plans.get("default", {})
+        
+        # update summary again to be sure
         self._set_issue_summary(
             session,
             period=target_draw.period,
             phase="await_result",
-            primary_numbers=list(judge["primary_numbers"]),
-            alternate_numbers=list(judge["alternate_numbers"]),
+            primary_numbers=list(judge.get("primary_numbers", [])),
+            alternate_numbers=list(judge.get("alternate_numbers", [])),
             trusted_strategy_ids=list(judge.get("trusted_strategy_ids", [])),
-            purchase_plan_type=purchase_plan.get("plan_type"),
-            purchase_ticket_count=purchase_plan.get("ticket_count"),
         )
         self._save_round_state(session, round_state)
         self._persist_session(session)
@@ -524,23 +487,28 @@ class LotteryWorldRuntime:
         round_state = dict(session.get("current_round", {}))
         if not round_state:
             return
-        predictions = _deserialize_prediction_map(
-            round_state.get("debate_predictions") or round_state.get("opening_predictions", {})
+        signals = _deserialize_prediction_map(
+            round_state.get("signal_predictions", {})
         )
         judge = dict(round_state.get("judge_decision", {}))
-        purchase_plan = dict(round_state.get("purchase_plan", {}))
-        if not predictions or not judge:
+        bet_plans = dict(round_state.get("bet_plans", {}))
+        
+        if not signals or not judge:
             return
+            
         self._set_phase(session, "settlement")
-        self._settle(session, actual_draw, predictions, judge, purchase_plan)
+        self._settle(session, actual_draw, signals, judge, bet_plans)
         self._complete_phase(session, "settlement")
+        
         self._set_phase(session, "postmortem")
-        events = self._postmortem(session, actual_draw, predictions, judge, options.parallelism)
+        events = self._postmortem(session, actual_draw, signals, judge, options.parallelism)
         self._append_events(session, events)
+        
         round_state["status"] = "settled"
         round_state["actual_numbers"] = list(actual_draw.numbers)
         round_state["postmortem_events"] = [item.to_dict() for item in events]
         round_state["updated_at"] = world_now()
+        
         session["round_history"].append(round_state)
         session["current_round"] = {}
         session["latest_prediction"] = {}
@@ -560,6 +528,51 @@ class LotteryWorldRuntime:
             actual_numbers=list(actual_draw.numbers),
         )
         self._persist_session(session)
+
+    def _settle(self, session, actual_draw, signals, judge, bet_plans) -> None:
+        actual = set(actual_draw.numbers)
+        strategy_issue_results = {}
+        hits = {}
+        for strategy_id, prediction in signals.items():
+            hit_count = len(actual & set(prediction.numbers))
+            hits[strategy_id] = hit_count
+            strategy_issue_results[strategy_id] = {
+                "period": actual_draw.period,
+                "date": actual_draw.date,
+                "hits": hit_count,
+                "predicted_numbers": list(prediction.numbers),
+                "actual_numbers": list(actual_draw.numbers),
+                "group": prediction.group,
+            }
+            state = _agent_state_row(session, strategy_id, prediction.display_name, prediction.rationale)
+            state["recent_hits"].append(hit_count)
+            
+        best_hits = max(hits.values(), default=0)
+        
+        # Calculate market payout from bet_plans
+        market_total_cost = 0
+        market_total_payout = 0
+        for plan_name, plan in bet_plans.items():
+            market_total_cost += plan.get("total_cost_yuan", 0)
+            market_total_payout += plan.get("total_payout", 0)
+            
+        session["settlement_history"].append(
+            {
+                "period": actual_draw.period,
+                "consensus_numbers": list(judge.get("primary_numbers", [])),
+                "alternate_numbers": list(judge.get("alternate_numbers", [])),
+                "actual_numbers": list(actual_draw.numbers),
+                "consensus_hits": len(actual & set(judge.get("primary_numbers", []))),
+                "best_hits": best_hits,
+                "best_strategy_ids": [sid for sid, value in hits.items() if value == best_hits][:3],
+                "purchase_profit": market_total_payout - market_total_cost,
+                "strategy_issue_results": strategy_issue_results,
+            }
+        )
+        session["shared_memory"]["recent_outcomes"] = recent_outcomes_text(list(session.get("settlement_history", [])))
+        self._sync_shared_blocks(session)
+        self._persist_session(session)
+
 
     def _postmortem(self, session, actual_draw, predictions, judge, parallelism: int) -> list[WorldEvent]:
         summary = (
@@ -1338,7 +1351,7 @@ class LotteryWorldRuntime:
         session_id: str | None = None,
     ):
         session = WorldSession.create(
-            WORLD_V1_RUNTIME_MODE,
+            WORLD_V2_MARKET_RUNTIME_MODE,
             pick_size,
             budget_yuan,
             list(strategies.keys()),

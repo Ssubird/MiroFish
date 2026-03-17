@@ -56,7 +56,7 @@ def get_lottery_graph_status():
 def sync_lottery_graph():
     payload = request.get_json(silent=True) or {}
     force = bool(payload.get("force", False))
-    mode = str(payload.get("mode", ZEP_GRAPH_MODE)).strip() or ZEP_GRAPH_MODE
+    mode = str(payload.get("mode", KUZU_GRAPH_MODE)).strip() or KUZU_GRAPH_MODE
     try:
         data = _sync_graph(mode, force)
         return jsonify({"success": True, "data": data})
@@ -147,6 +147,28 @@ def advance_lottery_world():
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:
         logger.exception("Failed to start lottery world session")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@lottery_bp.route("/world/evolution", methods=["POST"])
+def evolution_lottery_world():
+    payload = request.get_json(silent=True) or {}
+    strategy_ids = payload.get("strategy_ids")
+    iterations = int(payload.get("iterations", 3))
+    if strategy_ids is not None and not isinstance(strategy_ids, list):
+        return jsonify({"success": False, "error": "strategy_ids must be an array"}), 400
+    if iterations < 1:
+        return jsonify({"success": False, "error": "iterations must be at least 1"}), 400
+        
+    params = _backtest_params(payload)
+    params["runtime_mode"] = WORLD_V2_MARKET_RUNTIME_MODE
+    try:
+        data = world_runs.start_evolution(service, strategy_ids, params, iterations)
+        return jsonify({"success": True, "data": data}), 202
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.exception("Failed to start lottery evolutionary world session")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -266,6 +288,7 @@ def _backtest_params(payload: dict[str, object]) -> dict[str, object]:
         "live_interview_enabled": bool(payload.get("live_interview_enabled", DEFAULT_LIVE_INTERVIEW_ENABLED)),
         "budget_yuan": int(payload.get("budget_yuan", DEFAULT_BUDGET_YUAN)),
         "session_id": str(payload.get("session_id", "")).strip() or None,
+        "target_period": str(payload.get("target_period", "")).strip() or None,
     }
 
 

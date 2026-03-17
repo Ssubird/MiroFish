@@ -1,6 +1,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { advanceLotteryWorld } from '../api/lottery'
+import { advanceLotteryWorld, evolutionLotteryWorld } from '../api/lottery'
 import { useLotterySetup } from './useLotterySetup'
 import { useLotteryWorld } from './useLotteryWorld'
 
@@ -17,6 +17,8 @@ export const useLotteryWorldStudio = () => {
   const budgetYuan = ref(DEFAULT_BUDGET_YUAN)
   const llmParallelism = ref(DEFAULT_LLM_PARALLELISM)
   const agentDialogueRounds = ref(DEFAULT_DIALOGUE_ROUNDS)
+  const evolutionIterations = ref(3)
+  const targetPeriod = ref('')
   const liveInterviewEnabled = ref(true)
   const selectedStrategyIds = ref([])
   const selectedGraphNodeId = ref('')
@@ -31,6 +33,7 @@ export const useLotteryWorldStudio = () => {
 
   const busy = computed(() => setup.loadingOverview.value || setup.llmModelLoading.value || world.worldLoading.value || running.value)
   const availableStrategies = computed(() => setup.availableStrategies.value)
+  const historyPeriods = computed(() => setup.overview.value?.history_periods || [])
   const session = computed(() => world.worldSession.value?.session || null)
   const currentSessionId = computed(() => session.value?.session_id || '')
   const latestPrediction = computed(() => world.worldResult.value?.pending_prediction || session.value?.latest_prediction || null)
@@ -121,6 +124,42 @@ export const useLotteryWorldStudio = () => {
     }
   }
 
+  const evolutionWorld = async () => {
+    if (!canAdvance.value) return
+    error.value = ''
+    running.value = true
+    runMessage.value = `正在隐匿进行 ${evolutionIterations.value} 轮净化预测并复盘...`
+    world.stopPolling()
+    try {
+      const strategyIds = sanitizedStrategyIds()
+      selectedStrategyIds.value = [...strategyIds]
+      const response = await evolutionLotteryWorld({
+        strategy_ids: strategyIds,
+        iterations: evolutionIterations.value,
+        llm_model_name: setup.selectedModelName.value || undefined,
+        llm_parallelism: llmParallelism.value,
+        issue_parallelism: 1,
+        agent_dialogue_enabled: agentDialogueRounds.value > 0,
+        agent_dialogue_rounds: agentDialogueRounds.value,
+        live_interview_enabled: liveInterviewEnabled.value,
+        budget_yuan: budgetYuan.value,
+        session_id: currentSessionId.value || undefined
+      })
+      // Start polling the session to update the UI organically
+      const sessionId = response.data?.world_session?.session_id || currentSessionId.value || ''
+      if (sessionId) {
+        const snapshot = await world.loadWorld(sessionId)
+        if (snapshot) updateRunMessage(snapshot)
+        world.startPolling(sessionId, updateRunMessage)
+      }
+      ensureSelections()
+    } catch (err) {
+      running.value = false
+      runMessage.value = ''
+      error.value = err.message || '进化推演失败'
+    }
+  }
+
   const resetWorld = async () => {
     const ok = await world.resetWorld()
     if (!ok) return
@@ -163,11 +202,14 @@ export const useLotteryWorldStudio = () => {
     budgetYuan,
     llmParallelism,
     agentDialogueRounds,
+    evolutionIterations,
+    targetPeriod,
     liveInterviewEnabled,
     selectedStrategyIds,
     selectedGraphNodeId,
     selectedNumber,
     availableStrategies,
+    historyPeriods,
     llmModels: setup.llmModels,
     selectedModelName: setup.selectedModelName,
     modelProbeResult: setup.modelProbeResult,
@@ -187,6 +229,7 @@ export const useLotteryWorldStudio = () => {
     worldInterviewBusy: world.worldInterviewBusy,
     canAdvance,
     advanceWorld,
+    evolutionWorld,
     resetWorld,
     refreshWorld,
     submitInterview: () => world.submitWorldInterview(currentSessionId.value),

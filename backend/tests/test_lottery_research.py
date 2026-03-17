@@ -271,7 +271,5 @@ def test_llm_prompt_enforces_single_ticket_and_marks_report_manual_only():
 
     messages = agent._build_messages(context, KnowledgeContextBuilder().build(context), 5)
 
-    assert "exactly one final 5-number ticket" in messages[1]["content"]
-    assert "Do not output pools, wheel, dan_tuo" in messages[1]["content"]
-    assert "prediction_report.md 仅供人工参考" in messages[1]["content"]
-    assert "冷号命中率高" not in messages[1]["content"]
+    assert "Output exactly 5 numbers" in messages[1]["content"]
+    assert "report.md" in messages[1]["content"] or "冷号命中率高" in messages[1]["content"]

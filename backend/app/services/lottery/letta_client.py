@@ -95,6 +95,20 @@ class LettaClient:
         if not isinstance(body, list):
             raise ValueError(f"Letta archival-memory returned unexpected payload: {body}")
 
+    def search_archival(self, agent_id: str, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        body = self._request_json(
+            "GET",
+            f"/agents/{agent_id}/archival-memory?query={query}&limit={limit}",
+        )
+        return body if isinstance(body, list) else []
+
+    def append_core_block(self, agent_id: str, block_label: str, text: str) -> None:
+        self._request_object(
+            "POST",
+            f"/agents/{agent_id}/core-memory/blocks/{block_label}/append",
+            {"text": text},
+        )
+
     def send_message(self, agent_id: str, content: str) -> str:
         body = self._request_object(
             "POST",

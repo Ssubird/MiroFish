@@ -7,7 +7,7 @@ from statistics import fmean, pstdev
 
 from .happy8_rules import ticket_payout as happy8_ticket_payout
 
-SUPPORTED_ROI_PICK_SIZE = 5
+
 ROI_TICKET_COST_YUAN = 2
 ROI_FLOOR = -1.0
 ROI_CAP = 3.0
@@ -88,7 +88,7 @@ def _pick_size(issues: list[dict[str, object]]) -> int:
 
 
 def _roi_metrics(issues: list[dict[str, object]], pick_size: int) -> dict[str, object]:
-    if not issues or pick_size != SUPPORTED_ROI_PICK_SIZE:
+    if not issues or pick_size < 1:
         return {"strategy_roi": 0.0, "roi_score": NEUTRAL_ROI_SCORE, "roi_supported": False}
     total_cost = len(issues) * ROI_TICKET_COST_YUAN
     total_payout = sum(ticket_payout(pick_size, int(item.get("hits", 0))) for item in issues)

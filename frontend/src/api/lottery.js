@@ -33,6 +33,10 @@ export const advanceLotteryWorld = (data) => {
   return service.post('/api/lottery/world/advance', data, { timeout: 0 })
 }
 
+export const evolutionLotteryWorld = (data) => {
+  return service.post('/api/lottery/world/evolution', data, { timeout: 0 })
+}
+
 export const getCurrentLotteryWorld = () => {
   return service.get('/api/lottery/world/current')
 }

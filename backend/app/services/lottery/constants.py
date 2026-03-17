@@ -28,7 +28,8 @@ SOCIAL_GROUP = "social"
 JUDGE_GROUP = "judge"
 LEGACY_RUNTIME_MODE = "legacy"
 WORLD_V1_RUNTIME_MODE = "world_v1"
-RUNTIME_MODES = (LEGACY_RUNTIME_MODE, WORLD_V1_RUNTIME_MODE)
+WORLD_V2_MARKET_RUNTIME_MODE = "world_v2_market"
+RUNTIME_MODES = (LEGACY_RUNTIME_MODE, WORLD_V1_RUNTIME_MODE, WORLD_V2_MARKET_RUNTIME_MODE)
 LOCAL_GRAPH_MODE = "local"
 KUZU_GRAPH_MODE = "kuzu"
 ZEP_GRAPH_MODE = "zep"
@@ -40,4 +41,13 @@ WORLD_PHASES = (
     "judge_synthesis",
     "purchase_committee",
     "settle",
+)
+WORLD_V2_PHASES = (
+    "signal_opening",
+    "social_propagation",
+    "market_rerank",
+    "bettor_planning",
+    "plan_synthesis",
+    "settlement",
+    "postmortem",
 )

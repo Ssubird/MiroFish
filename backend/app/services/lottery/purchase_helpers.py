@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from .performance_summary import performance_rows
-from .purchase_structures import PLAN_TYPE_PORTFOLIO, STRUCTURE_NUMBER_LIMIT
+from .purchase_structures import PLAN_TYPE_PORTFOLIO
+
+
+MAX_POOL_NUMBERS = 30
 
 
 PROMPT_PREVIEW_CHARS = 900
@@ -152,9 +155,9 @@ def planner_payload(
         "hedge_numbers": clean_numbers(response.get("hedge_numbers"), TRUSTED_LIMIT),
         "avoid_numbers": clean_numbers(response.get("avoid_numbers"), TRUSTED_LIMIT),
         "tickets": response.get("tickets") if isinstance(response.get("tickets"), list) else [],
-        "wheel_numbers": clean_numbers(response.get("wheel_numbers"), STRUCTURE_NUMBER_LIMIT),
+        "wheel_numbers": clean_numbers(response.get("wheel_numbers"), MAX_POOL_NUMBERS),
         "banker_numbers": clean_numbers(response.get("banker_numbers"), max(pick_size - 1, 0)),
-        "drag_numbers": clean_numbers(response.get("drag_numbers"), STRUCTURE_NUMBER_LIMIT),
+        "drag_numbers": clean_numbers(response.get("drag_numbers"), MAX_POOL_NUMBERS),
         "portfolio_legs": _clean_portfolio_legs(response.get("portfolio_legs"), pick_size),
         "rationale": str(response.get("rationale", "")).strip() or "LLM did not provide a purchase rationale.",
         "focus": clean_focus(response.get("focus")),
@@ -247,9 +250,9 @@ def _clean_portfolio_legs(raw: object, pick_size: int) -> list[dict[str, object]
                 "plan_type": str(item.get("plan_type", "")).strip().lower(),
                 "play_size": item.get("play_size"),
                 "tickets": item.get("tickets") if isinstance(item.get("tickets"), list) else [],
-                "wheel_numbers": clean_numbers(item.get("wheel_numbers"), STRUCTURE_NUMBER_LIMIT),
+                "wheel_numbers": clean_numbers(item.get("wheel_numbers"), MAX_POOL_NUMBERS),
                 "banker_numbers": clean_numbers(item.get("banker_numbers"), max(pick_size - 1, 0)),
-                "drag_numbers": clean_numbers(item.get("drag_numbers"), STRUCTURE_NUMBER_LIMIT),
+                "drag_numbers": clean_numbers(item.get("drag_numbers"), MAX_POOL_NUMBERS),
                 "primary_ticket": clean_numbers(item.get("primary_ticket"), max(pick_size, 1)),
                 "comment": str(item.get("comment", "")).strip(),
                 "rationale": str(item.get("rationale", "")).strip(),

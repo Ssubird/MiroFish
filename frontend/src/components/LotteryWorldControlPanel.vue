@@ -5,9 +5,14 @@
         <p class="eyebrow">SIMULATOR</p>
         <h2>持续世界模拟器</h2>
       </div>
-      <button type="button" class="run-btn" :disabled="!canAdvance" @click="$emit('advance')">
-        {{ busy ? '运行中...' : '同步并推进' }}
-      </button>
+      <div class="header-actions" style="display: flex; gap: 0.5rem; align-items: center;">
+        <button type="button" class="run-btn prompt" :disabled="!canAdvance" @click="$emit('evolution')">
+          {{ busy ? '运行中...' : '净化预测' }}
+        </button>
+        <button type="button" class="run-btn" :disabled="!canAdvance" @click="$emit('advance')">
+          同步并推进
+        </button>
+      </div>
     </header>
 
     <p v-if="runMessage" class="run-message">{{ runMessage }}</p>
@@ -31,6 +36,17 @@
       <label class="field">
         <span>讨论轮数</span>
         <input :value="agentDialogueRounds" type="number" min="0" max="3" @input="$emit('update:agentDialogueRounds', Number($event.target.value || 0))" />
+      </label>
+      <label class="field">
+        <span>盲测进化轮数 (Phase 7)</span>
+        <input :value="evolutionIterations" type="number" min="1" max="5" @input="$emit('update:evolutionIterations', Number($event.target.value || 3))" />
+      </label>
+      <label class="field">
+        <span>穿越时空（目标期次）</span>
+        <select :value="targetPeriod" @change="$emit('update:targetPeriod', $event.target.value)">
+          <option value="">最新待开奖</option>
+          <option v-for="period in historyPeriods" :key="period" :value="period">{{ period }} 期</option>
+        </select>
       </label>
       <label class="toggle-field">
         <input :checked="liveInterviewEnabled" type="checkbox" @change="$emit('update:liveInterviewEnabled', $event.target.checked)" />
@@ -90,11 +106,15 @@ defineProps({
   llmModelLoading: { type: Boolean, default: false },
   runMessage: { type: String, default: '' },
   busy: { type: Boolean, default: false },
-  canAdvance: { type: Boolean, default: false }
+  canAdvance: { type: Boolean, default: false },
+  evolutionIterations: { type: Number, default: 3 },
+  targetPeriod: { type: String, default: '' },
+  historyPeriods: { type: Array, default: () => [] }
 })
 
 defineEmits([
   'advance',
+  'evolution',
   'probe-model',
   'select-all',
   'toggle-strategy',
@@ -102,7 +122,9 @@ defineEmits([
   'update:llmParallelism',
   'update:agentDialogueRounds',
   'update:liveInterviewEnabled',
-  'update:selectedModelName'
+  'update:selectedModelName',
+  'update:evolutionIterations',
+  'update:targetPeriod'
 ])
 </script>
 

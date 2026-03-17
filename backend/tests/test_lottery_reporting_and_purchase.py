@@ -87,17 +87,16 @@ def test_clean_numbers_accepts_single_nested_ticket_and_rejects_multi_ticket():
 def test_single_ticket_rule_reserves_expansion_for_purchase_committee():
     rule = single_ticket_rule(5)
 
-    assert "exactly one final 5-number ticket" in rule
-    assert "purchase committee" in rule
-    assert "3 alternate numbers" in rule
+    assert "Output exactly 5 numbers" in rule
+    assert "1-80" in rule
 
 
 def test_purchase_prompt_guidance_forces_play_size_comparison():
     rule_block = purchase_rule_block()
     schema = purchase_schema()
 
-    assert "Compare play sizes 3/4/5/6" in rule_block
-    assert "Do not lazily spend the whole budget on pick-5 singles" in rule_block
+    assert "Compare all available play sizes" in rule_block
+    assert "Multiplier: 1-15x" in rule_block
     assert '"play_size_review"' in schema
     assert '"chosen_edge"' in schema
     assert '"portfolio_legs"' in schema
@@ -174,8 +173,8 @@ def test_purchase_discussion_messages_include_budget_primary_and_alternates():
     prompt = messages[1]["content"]
 
     assert "Budget: 50 yuan" in prompt
-    assert "Primary Prediction (fixed one ticket): [78, 42, 7, 44, 5]" in prompt
-    assert "Alternate Numbers (fixed 3): [19, 23, 61]" in prompt
+    assert "Primary Prediction (5 numbers): [78, 42, 7, 44, 5]" in prompt
+    assert "Alternate Numbers: [19, 23, 61]" in prompt
     assert "External Reports:" in prompt
     assert "Persistent Social State:" in prompt
 

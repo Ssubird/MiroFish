@@ -6,14 +6,13 @@ from dataclasses import dataclass
 from itertools import combinations
 from math import comb
 
-from .happy8_rules import ALLOWED_PLAY_SIZES, play_rule
+from .happy8_rules import play_rule
 
 
 PLAN_TYPE_TICKETS = "tickets"
 PLAN_TYPE_WHEEL = "wheel"
 PLAN_TYPE_DAN_TUO = "dan_tuo"
 PLAN_TYPE_PORTFOLIO = "portfolio"
-STRUCTURE_NUMBER_LIMIT = 12
 PORTFOLIO_LEG_LIMIT = 6
 
 
@@ -129,8 +128,7 @@ def _play_size(planner: dict[str, object], default_pick_size: int) -> int:
         play_size = int(raw)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"invalid purchase play_size: {raw}") from exc
-    if play_size not in ALLOWED_PLAY_SIZES:
-        raise ValueError(f"purchase play_size must be one of {ALLOWED_PLAY_SIZES}")
+    play_rule(play_size)  # validates range 1-10
     return play_size
 
 
@@ -155,7 +153,7 @@ def _ticket_plan(planner: dict[str, object], play_size: int, max_tickets: int) -
 
 
 def _wheel_plan(planner: dict[str, object], play_size: int, max_tickets: int) -> TicketStructure:
-    wheel_numbers = _flat_numbers(planner.get("wheel_numbers"), STRUCTURE_NUMBER_LIMIT)
+    wheel_numbers = _flat_numbers(planner.get("wheel_numbers"), _max_pool_size(max_tickets, play_size))
     if len(wheel_numbers) < play_size:
         raise ValueError("plan_type=wheel requires wheel_numbers to cover the selected play_size")
     combination_count = comb(len(wheel_numbers), play_size)
@@ -175,7 +173,7 @@ def _wheel_plan(planner: dict[str, object], play_size: int, max_tickets: int) ->
 
 def _dan_tuo_plan(planner: dict[str, object], play_size: int, max_tickets: int) -> TicketStructure:
     banker_numbers = _flat_numbers(planner.get("banker_numbers"), play_size - 1)
-    drag_numbers = [number for number in _flat_numbers(planner.get("drag_numbers"), STRUCTURE_NUMBER_LIMIT) if number not in banker_numbers]
+    drag_numbers = [number for number in _flat_numbers(planner.get("drag_numbers"), _max_pool_size(max_tickets, play_size)) if number not in banker_numbers]
     if not banker_numbers:
         raise ValueError("plan_type=dan_tuo requires banker_numbers")
     if len(banker_numbers) >= play_size:
@@ -247,3 +245,12 @@ def _ticket_pool(scores: dict[int, float], preferred: list[int], pool_size: int)
 
 def _combo_key(ticket: tuple[int, ...], scores: dict[int, float]) -> tuple[float, int]:
     return (sum(scores[number] for number in ticket), -sum(ticket))
+
+
+def _max_pool_size(max_tickets: int, play_size: int) -> int:
+    """Compute the largest pool size whose C(n, play_size) <= max_tickets."""
+    MAX_POOL_CEILING = 80
+    for n in range(play_size, MAX_POOL_CEILING + 1):
+        if comb(n, play_size) > max_tickets:
+            return n - 1
+    return MAX_POOL_CEILING

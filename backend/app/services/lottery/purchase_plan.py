@@ -13,7 +13,6 @@ from .purchase_structures import TicketStructure, deterministic_tickets, planner
 from .research_types import WindowBacktest
 
 
-PRIMARY_SELECTION_SIZE = 5
 PLAN_BUDGET_YUAN = 50
 TICKET_COST_YUAN = 2
 MAX_TICKETS = PLAN_BUDGET_YUAN // TICKET_COST_YUAN
@@ -51,8 +50,6 @@ class PurchasePlanService:
 
     def build(self, request: PurchasePlanRequest) -> dict[str, object]:
         history = self._historical_backtest(request)
-        if request.pick_size != PRIMARY_SELECTION_SIZE:
-            return self._unsupported_plan(history, request)
         if not Config.LLM_API_KEY:
             return self._skipped_plan(history, request, "LLM_API_KEY is not configured.")
         if not self._has_llm_predictions(request.pending_predictions):
@@ -152,7 +149,7 @@ class PurchasePlanService:
 
     def _ticket_payout(self, ticket: tuple[int, ...], actual_numbers: tuple[int, ...]) -> int:
         hits = len(set(ticket) & set(actual_numbers))
-        return ticket_payout(PRIMARY_SELECTION_SIZE, hits)
+        return ticket_payout(len(ticket), hits)
 
     def _structure_payload(self, structure: TicketStructure) -> dict[str, object]:
         payload = dict(structure.summary)
@@ -178,13 +175,6 @@ class PurchasePlanService:
             "alternate_numbers": list(request.alternate_numbers),
         }
 
-    def _unsupported_plan(self, history: dict[str, object], request: PurchasePlanRequest) -> dict[str, object]:
-        return {
-            "status": "unsupported",
-            "reason": f"Purchase planning expects a 5-number primary prediction, got pick_size={request.pick_size}.",
-            **self._plan_context(request),
-            "historical_backtest": history,
-        }
 
     def _skipped_plan(self, history: dict[str, object], request: PurchasePlanRequest, reason: str) -> dict[str, object]:
         return {

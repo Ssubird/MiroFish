@@ -366,6 +366,7 @@ function registerNode(nodeMap, node) {
   stroke-width: 1.5;
   stroke-dasharray: 4, 2;
   transition: all 0.3s ease;
+  transform-box: fill-box;
   transform-origin: center;
 }
 
@@ -414,6 +415,8 @@ function registerNode(nodeMap, node) {
   stroke: #fff;
   stroke-width: 1;
   stroke-dasharray: 2, 6;
+  transform-box: fill-box;
+  transform-origin: center;
   animation: spin 10s linear infinite;
 }
 

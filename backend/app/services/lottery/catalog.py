@@ -8,8 +8,10 @@ from ...config import Config
 from .agents import (
     build_data_agents,
     build_hybrid_agents,
+    build_judge_agents,
     build_llm_agents,
     build_metaphysics_agents,
+    build_social_agents,
 )
 from .constants import (
     DEFAULT_AGENT_DIALOGUE_ENABLED,
@@ -27,6 +29,14 @@ def build_strategy_catalog(chart_count: int = 0) -> dict[str, object]:
     strategies.update(build_metaphysics_agents(chart_count))
     strategies.update(build_hybrid_agents())
     strategies.update(build_llm_agents())
+    return strategies
+
+
+def build_market_v2_catalog(chart_count: int = 0) -> dict[str, object]:
+    """Full catalog for World V2 Market: generators + social + judge."""
+    strategies = build_strategy_catalog(chart_count)
+    strategies.update(build_social_agents())
+    strategies.update(build_judge_agents())
     return strategies
 
 
@@ -55,8 +65,8 @@ def build_llm_status() -> dict[str, object]:
         "default_agent_dialogue_enabled": DEFAULT_AGENT_DIALOGUE_ENABLED,
         "default_agent_dialogue_rounds": DEFAULT_AGENT_DIALOGUE_ROUNDS,
         "note": (
-            "Persistent world keeps generator agents only by default: "
+            "Persistent world keeps generator agents only by default for V1: "
             "data, metaphysics, hybrid, llm_ziwei_graph, and llm_hybrid_panel. "
-            "Social and judge amplifiers are removed."
+            "Social and judge amplifiers are available in 'world_v2_market'."
         ),
     }

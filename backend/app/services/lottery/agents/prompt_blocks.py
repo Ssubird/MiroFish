@@ -67,13 +67,25 @@ def expert_interview_summary(context) -> str:
     return "\n".join(_interview_line(item) for item in interviews)
 
 
-def prompt_summary(context) -> str:
+def prompt_summary(context, agent_id: str = "") -> str:
     prompts = list(getattr(context, "prompt_documents", ()) or ())
     if not prompts:
         prompts = [item for item in context.knowledge_documents if item.kind == "prompt"]
     if not prompts:
         return "No dedicated Happy 8 prompt asset."
-    return "\n".join(f"- {item.name}: {_content_excerpt(item.content)}" for item in prompts[:PROMPT_LIMIT])
+    
+    if agent_id:
+        if "social" in agent_id:
+            targeted = [p for p in prompts if "narrator" in p.name or "social" in p.name]
+            if targeted: prompts = targeted
+        elif "judge" in agent_id or "purchase" in agent_id:
+            targeted = [p for p in prompts if "advisor" in p.name or "betting" in p.name]
+            if targeted: prompts = targeted
+        elif "ziwei" in agent_id or "hybrid" in agent_id:
+            targeted = [p for p in prompts if "extractor" in p.name or "classifier" in p.name]
+            if targeted: prompts = targeted
+
+    return "\n".join(f"- {item.name}: {_content_excerpt(item.content)}" for item in prompts[:4])
 
 
 def named_report_summary(context, name: str) -> str:
@@ -82,22 +94,30 @@ def named_report_summary(context, name: str) -> str:
 
 
 def report_summary(context) -> str:
-    del context
-    return MANUAL_REPORT_NOTE
+    reports = [d for d in context.knowledge_documents if d.kind == "report"]
+    if not reports:
+        return "No report documents available."
+    excerpts = [
+        f"- {doc.name}: {_content_excerpt(doc.content)}"
+        for doc in reports[:REPORT_LIMIT]
+    ]
+    return "\n".join(excerpts)
 
 
 def optimization_goal(context) -> str:
     return context.optimization_goal or "Goal: jointly optimize hit rate, ROI, stability, and anti-overheat penalty."
 
 
-def single_ticket_rule(pick_size: int) -> str:
-    return "\n".join(
-        [
-            f"Your strategy output must be exactly one final {pick_size}-number ticket.",
-            "Do not output pools, wheel, dan_tuo, backup sets, or multiple candidate tickets.",
-            "The system will generate 3 alternate numbers separately, and the purchase committee may expand the buy plan later.",
-        ]
+def output_format_rule(pick_size: int) -> str:
+    """Flexible output format — replaces the old single_ticket_rule."""
+    return (
+        f"Output exactly {pick_size} numbers from 1-80 as your primary prediction. "
+        "You may also include ranked_scores, structure_bias, and play_size_bias in metadata."
     )
+
+
+# backward-compat alias
+single_ticket_rule = output_format_rule
 
 
 def social_goal() -> str:

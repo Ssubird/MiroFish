@@ -219,6 +219,7 @@ const nodeScope = (node) => {
 .form-grid {
   display: grid;
   gap: 1rem;
+  flex-shrink: 0;
 }
 
 .summary-grid,
@@ -234,6 +235,10 @@ const nodeScope = (node) => {
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.inspector-header {
+  flex-shrink: 0;
 }
 
 .inspector-header,
@@ -253,6 +258,7 @@ const nodeScope = (node) => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
   transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
 .focus-card {

@@ -186,20 +186,21 @@ class PurchaseDiscussionService:
         return [self._system_message("Synthesize a final purchase plan from the committee discussion."), {"role": "user", "content": "\n".join(lines)}]
 
     def _shared_lines(self, request) -> list[str]:
+        pick = getattr(request, "pick_size", 5)
         return [
             f"Target Period: {request.context.target_draw.period}",
             f"Budget: {self.budget_yuan} yuan; unit ticket cost: {self.ticket_cost_yuan} yuan; max tickets: {self.max_tickets}",
-            f"Primary Prediction (fixed one ticket): {list(request.ensemble_numbers)}",
-            f"Alternate Numbers (fixed 3): {list(request.alternate_numbers)}",
-            "Primary prediction is fixed to one 5-number ticket. Only the purchase committee may expand it into tickets / wheel / dan_tuo / portfolio.",
-            "Use the committee discussion to decide how to spend the 50 yuan budget, not just the strongest single ticket.",
-            "You may mix multiple play sizes and structures as long as total cost stays within budget.",
+            f"Primary Prediction ({pick} numbers): {list(request.ensemble_numbers)}",
+            f"Alternate Numbers: {list(request.alternate_numbers)}",
+            "The purchase committee may expand the primary prediction into tickets / wheel / dan_tuo / portfolio.",
+            f"Use the committee discussion to decide how to spend the {self.budget_yuan} yuan budget.",
+            "You may mix multiple play sizes (1-10) and structures as long as total cost stays within budget.",
             "Backtest Performance:",
             performance_block(request.performance),
             "World State:",
             world_summary(request.context),
             "Prompt Asset:",
-            prompt_summary(request.context),
+            prompt_summary(request.context, "purchase"),
             "Expert Interviews:",
             expert_interview_summary(request.context),
             "Current Candidate Board:",
@@ -237,10 +238,10 @@ class PurchaseDiscussionService:
     def _plan_schema(self) -> str:
         return (
             'Return JSON only: {"plan_style":"...", "plan_type":"tickets|wheel|dan_tuo|portfolio", '
-            '"play_size":3, "play_size_review":{"3":"...","4":"...","5":"...","6":"..."}, '
+            '"play_size":5, "play_size_review":{"<size>":"<reason>"}, '
             '"chosen_edge":"...", "trusted_strategy_ids":["..."], "tickets":[[...]], '
             '"wheel_numbers":[...], "banker_numbers":[...], "drag_numbers":[...], '
-            '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":3,"tickets":[[...]],'
+            '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":5,"tickets":[[...]],'
             '"wheel_numbers":[...],"banker_numbers":[...],"drag_numbers":[...],"primary_ticket":[...],"comment":"...","rationale":"..."}], '
             '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], '
             '"focus":["..."], "rationale":"..."}'
@@ -249,10 +250,10 @@ class PurchaseDiscussionService:
     def _discussion_schema(self) -> str:
         return (
             'Return JSON only: {"comment":"...", "support_role_ids":["..."], "plan_style":"...", '
-            '"plan_type":"tickets|wheel|dan_tuo|portfolio", "play_size":3, '
-            '"play_size_review":{"3":"...","4":"...","5":"...","6":"..."}, "chosen_edge":"...", '
+            '"plan_type":"tickets|wheel|dan_tuo|portfolio", "play_size":5, '
+            '"play_size_review":{"<size>":"<reason>"}, "chosen_edge":"...", '
             '"trusted_strategy_ids":["..."], "tickets":[[...]], "wheel_numbers":[...], '
-            '"banker_numbers":[...], "drag_numbers":[...], "portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":3}], '
+            '"banker_numbers":[...], "drag_numbers":[...], "portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":5}], '
             '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], "focus":["..."], "rationale":"..."}'
         )
 

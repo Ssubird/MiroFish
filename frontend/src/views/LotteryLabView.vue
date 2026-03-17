@@ -21,6 +21,9 @@
           :budget-yuan="budgetYuan"
           :llm-parallelism="llmParallelism"
           :agent-dialogue-rounds="agentDialogueRounds"
+          :evolution-iterations="evolutionIterations"
+          :target-period="targetPeriod"
+          :history-periods="historyPeriods"
           :live-interview-enabled="liveInterviewEnabled"
           :llm-models="llmModels"
           :selected-model-name="selectedModelName"
@@ -30,12 +33,15 @@
           :busy="busy"
           :can-advance="canAdvance"
           @advance="advanceWorld"
+          @evolution="evolutionWorld"
           @probe-model="probeSelectedModel(selectedModelName)"
           @select-all="selectedStrategyIds = availableStrategies.map((item) => item.strategy_id)"
           @toggle-strategy="toggleStrategy"
           @update:budgetYuan="budgetYuan = $event"
           @update:llmParallelism="llmParallelism = $event"
           @update:agentDialogueRounds="agentDialogueRounds = $event"
+          @update:evolutionIterations="evolutionIterations = $event"
+          @update:targetPeriod="targetPeriod = $event"
           @update:liveInterviewEnabled="liveInterviewEnabled = $event"
           @update:selectedModelName="selectedModelName = $event"
         />
@@ -98,6 +104,9 @@ const {
   budgetYuan,
   llmParallelism,
   agentDialogueRounds,
+  evolutionIterations,
+  targetPeriod,
+  historyPeriods,
   liveInterviewEnabled,
   selectedStrategyIds,
   selectedGraphNodeId,
@@ -122,6 +131,7 @@ const {
   worldInterviewBusy,
   canAdvance,
   advanceWorld,
+  evolutionWorld,
   resetWorld,
   refreshWorld,
   submitInterview,

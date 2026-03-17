@@ -13,8 +13,12 @@ flask-cors>=6.0.0
 # OpenAI SDK（统一使用 OpenAI 格式调用 LLM）
 openai>=1.0.0
 
-# ============= Zep Cloud =============
-zep-cloud==3.13.0
+# Zep Cloud (Optional legacy graph)
+# zep-cloud==3.13.0
+
+# ============= 核心新架构 =============
+kuzu>=0.11.3
+mcp
 
 # ============= OASIS 社交媒体模拟 =============
 # OASIS 社交模拟框架

@@ -47,6 +47,37 @@ class WorldRunManager:
         finally:
             self._cleanup(session_id)
 
+    def start_evolution(self, service, strategy_ids: list[str] | None, params: dict[str, Any], iterations: int) -> dict[str, object]:
+        params["runtime_mode"] = "world_v2_market" # evolution must use v2 market for now
+        # prepare an initial valid session state
+        initial = service.prepare_world_session(strategy_ids=strategy_ids, **params)
+        session_id = str(initial["world_session"]["session_id"])
+        with self._lock:
+            future = self._futures.get(session_id)
+            if future is None or future.done():
+                self._futures[session_id] = self._executor.submit(
+                    self._run_evolution,
+                    service,
+                    strategy_ids,
+                    {**params, "session_id": session_id},
+                    iterations,
+                )
+        return initial
+
+    def _run_evolution(self, service, strategy_ids: list[str] | None, params: dict[str, Any], iterations: int) -> None:
+        session_id = str(params["session_id"])
+        try:
+            service.run_world_evolution(iterations=iterations, strategy_ids=strategy_ids, **params)
+        except Exception:
+            rt = service._runtime_for_mode("world_v2_market")
+            if rt.store.result_exists(session_id):
+                service.finalize_world_result(session_id)
+            logger.exception("Evolution world session failed: %s", session_id)
+        else:
+            service.finalize_world_result(session_id)
+        finally:
+            self._cleanup(session_id)
+
     def _cleanup(self, session_id: str) -> None:
         with self._lock:
             self._futures.pop(session_id, None)

@@ -119,9 +119,16 @@ def merge_issue_discussion(issue_base: str, digests: list[str]) -> str:
     return _limit(merged, ISSUE_BRIEF_LIMIT)
 
 
-def report_digest(context: PredictionContext) -> str:
-    del context
-    return MANUAL_REPORT_DIGEST
+def report_digest(context: PredictionContext, all_documents: tuple | None = None) -> str:
+    docs = all_documents if all_documents is not None else context.knowledge_documents
+    reports = [d for d in docs if d.kind == "report"]
+    if not reports:
+        return "No report documents available."
+    excerpts = []
+    for doc in reports[:2]:
+        text = " ".join(doc.content.split())[:DIGEST_LIMIT // 2]
+        excerpts.append(f"- {doc.name}: {text}")
+    return _limit("\n".join(excerpts), DIGEST_LIMIT)
 
 
 def prompt_passages(context: PredictionContext) -> list[str]:
@@ -188,10 +195,10 @@ def purchase_schema() -> str:
     sizes = ",".join(str(item) for item in ALLOWED_PLAY_SIZES)
     return (
         'Return JSON only: {"plan_style":"...", "plan_type":"tickets|wheel|dan_tuo|portfolio", '
-        '"play_size":3, "play_size_review":{"3":"...","4":"...","5":"...","6":"..."}, '
+        '"play_size":5, "play_size_review":{...}, '
         '"chosen_edge":"...", "trusted_strategy_ids":["..."], "tickets":[[...]], '
         '"wheel_numbers":[...], "banker_numbers":[...], "drag_numbers":[...], '
-        '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":3,"tickets":[[...]],'
+        '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":5,"tickets":[[...]],'
         '"wheel_numbers":[...],"banker_numbers":[...],"drag_numbers":[...],"primary_ticket":[...],"comment":"...","rationale":"..."}], '
         '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], '
         '"candidate_numbers":[...], "avoid_numbers":[...], "support_role_ids":["..."], '
@@ -201,18 +208,16 @@ def purchase_schema() -> str:
 
 
 def purchase_rule_block() -> str:
+    sizes = ", ".join(str(s) for s in ALLOWED_PLAY_SIZES)
     return "\n".join(
         [
             "Happy 8 purchase rules:",
-            "Allowed play sizes: 3, 4, 5, 6.",
-            "Each ticket costs 2 yuan.",
+            f"Allowed play sizes: {sizes}.",
+            "Each ticket costs 2 yuan. Multiplier: 1-15x.",
             *play_rule_lines(),
             "Allowed structures: tickets, wheel, dan_tuo, portfolio.",
-            "Portfolio may mix multiple structures and multiple play sizes as long as total cost stays within budget.",
-            "If fixed primary plus alternates are insufficient, expand from candidate numbers and public debate.",
-            "Compare play sizes 3/4/5/6 before choosing.",
-            "Compare play sizes 3, 4, 5, and 6 before choosing.",
-            "Do not lazily spend the whole budget on pick-5 singles unless you explicitly prove it is superior.",
+            "Portfolio may mix multiple structures and play sizes as long as total cost stays within budget.",
+            "Compare all available play sizes before choosing.",
         ]
     )
 

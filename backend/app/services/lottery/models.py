@@ -137,3 +137,41 @@ class StrategyPrediction:
     ranked_scores: tuple[tuple[int, float], ...]
     kind: str = "rule"
     metadata: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class SignalOutput:
+    """Structured signal produced by a signal-layer agent."""
+
+    strategy_id: str
+    number_scores: Mapping[int, float]
+    play_size_bias: int | None
+    structure_bias: str
+    regime_label: str
+    evidence_refs: tuple[str, ...]
+    public_post: str
+
+
+@dataclass(frozen=True)
+class BetLeg:
+    """A single leg within a multi-leg bet plan."""
+
+    play_size: int
+    plan_type: str
+    numbers: tuple[int, ...]
+    banker_numbers: tuple[int, ...] | None
+    drag_numbers: tuple[int, ...] | None
+    multiple: int
+    rationale: str
+
+
+@dataclass(frozen=True)
+class BetPlan:
+    """Complete betting plan produced by a bettor persona."""
+
+    persona_id: str
+    legs: tuple[BetLeg, ...]
+    total_cost_yuan: int
+    play_size_review: Mapping[str, str]
+    risk_exposure: str
+    rationale: str
