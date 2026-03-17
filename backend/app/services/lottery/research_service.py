@@ -345,9 +345,10 @@ class LotteryResearchService:
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
+        target_period: str | None = None,
     ) -> dict[str, object]:
-        if runtime_mode != WORLD_V1_RUNTIME_MODE:
-            raise ValueError("prepare_world_session requires runtime_mode=world_v1")
+        if runtime_mode not in (WORLD_V1_RUNTIME_MODE, WORLD_V2_MARKET_RUNTIME_MODE):
+            raise ValueError(f"prepare_world_session unsupported mode: {runtime_mode}")
         options = self._build_options(
             evaluation_size,
             pick_size,
@@ -369,7 +370,8 @@ class LotteryResearchService:
         )
         assets = self.runtime.load_workspace()
         selected = select_strategies(assets.strategies, strategy_ids)
-        session = self.world_runtime.prepare_session(assets, selected, pick_size, options.model_name, options.session_id)
+        rt = self._runtime_for_mode(runtime_mode)
+        session = rt.prepare_session(assets, selected, pick_size, options.model_name, options.session_id)
         return {
             "evaluation": {
                 "runtime_mode": runtime_mode,

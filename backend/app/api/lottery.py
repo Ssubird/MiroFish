@@ -21,6 +21,7 @@ from ..services.lottery.constants import (
     LEGACY_RUNTIME_MODE,
     LOCAL_GRAPH_MODE,
     WORLD_V1_RUNTIME_MODE,
+    WORLD_V2_MARKET_RUNTIME_MODE,
     WORLD_WARMUP_ISSUES,
     ZEP_GRAPH_MODE,
 )

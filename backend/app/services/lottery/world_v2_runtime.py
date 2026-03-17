@@ -2079,16 +2079,27 @@ def _round_trace(round_state: dict[str, Any], debate_events: list[dict[str, Any]
     ]
 
 
-def _trace_event_item(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "strategy_id": item.get("actor_id", item.get("strategy_id", "-")),
-        "display_name": item.get("actor_display_name", item.get("display_name", "-")),
-        "group": item.get("metadata", {}).get("group", item.get("group", "-")),
-        "kind": item.get("event_type", item.get("kind", "-")),
-        "numbers": list(item.get("numbers", [])),
-        "comment": item.get("content", item.get("comment", "")),
-    }
-
+def _trace_event_item(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return {
+            "strategy_id": item.get("actor_id", item.get("strategy_id", "-")),
+            "display_name": item.get("actor_display_name", item.get("display_name", "-")),
+            "group": item.get("metadata", {}).get("group", item.get("group", "-")),
+            "kind": item.get("event_type", item.get("kind", "-")),
+            "numbers": list(item.get("numbers", [])),
+            "comment": item.get("content", item.get("comment", "")),
+        }
+    else:
+        # Handle WorldEvent or other object types
+        metadata = getattr(item, "metadata", {})
+        return {
+            "strategy_id": getattr(item, "actor_id", getattr(item, "strategy_id", "-")),
+            "display_name": getattr(item, "actor_display_name", getattr(item, "display_name", "-")),
+            "group": metadata.get("group", getattr(item, "group", "-")) if isinstance(metadata, dict) else getattr(metadata, "group", getattr(item, "group", "-")),
+            "kind": getattr(item, "event_type", getattr(item, "kind", "-")),
+            "numbers": list(getattr(item, "numbers", []) or []),
+            "comment": getattr(item, "content", getattr(item, "comment", "")),
+        }
 
 def _process_trace(session) -> list[dict[str, Any]]:
     trace = []
