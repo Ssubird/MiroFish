@@ -27,6 +27,22 @@ class FakeSession:
         self.requests.append((method, url, json))
         if url.endswith("/agents/"):
             return FakeResponse({"id": "agent-1"})
+        if url.endswith("/agents/agent-1/tools") and method == "GET":
+            return FakeResponse([{"id": "tool-1"}, {"id": "tool-2"}])
+        if url.endswith("/agents/agent-1/tools/attach/tool-9") and method == "PATCH":
+            return FakeResponse({"ok": True})
+        if url.endswith("/tools/mcp/servers") and method == "GET":
+            return FakeResponse([{"server_name": "happy8_rules_mcp"}])
+        if url.endswith("/tools/mcp/servers") and method == "PUT":
+            return FakeResponse({"server_name": json["server_name"]})
+        if url.endswith("/tools/mcp/servers/connect") and method == "POST":
+            return FakeResponse({"server_name": json["server_name"], "connected": True})
+        if url.endswith("/tools/mcp/servers/happy8_rules_mcp/resync") and method == "POST":
+            return FakeResponse({"server_name": "happy8_rules_mcp", "resynced": True})
+        if url.endswith("/tools/mcp/servers/happy8_rules_mcp/tools") and method == "GET":
+            return FakeResponse([{"id": "tool-9", "name": "validate_plan"}])
+        if url.endswith("/tools/mcp/servers/happy8_rules_mcp/tools/validate_plan/execute") and method == "POST":
+            return FakeResponse({"ok": True, "args": json["args"]})
         if url.endswith("/messages"):
             return FakeResponse(
                 {
@@ -115,3 +131,31 @@ def test_client_bootstraps_local_runtime_for_managed_session():
         )
 
     ensure.assert_called_once_with("http://127.0.0.1:8283/v1")
+
+
+def test_client_supports_agent_tool_attachment_and_mcp_endpoints():
+    session = FakeSession()
+    client = LettaClient(
+        base_url="http://127.0.0.1:8283/v1",
+        model_name="gpt-5.4",
+        embedding_model="openai/text-embedding-3-large",
+        session=session,
+    )
+
+    tools = client.list_tools_for_agent("agent-1")
+    attach = client.attach_tool_to_agent("agent-1", "tool-9")
+    servers = client.list_mcp_servers()
+    added = client.add_mcp_server({"server_name": "happy8_rules_mcp"})
+    connected = client.connect_mcp_server({"server_name": "happy8_rules_mcp"})
+    resynced = client.resync_mcp_server_tools("happy8_rules_mcp")
+    server_tools = client.list_mcp_tools_by_server("happy8_rules_mcp")
+    executed = client.execute_mcp_tool("happy8_rules_mcp", "validate_plan", {"plan": "{}"})
+
+    assert [item["id"] for item in tools] == ["tool-1", "tool-2"]
+    assert attach["ok"] is True
+    assert servers[0]["server_name"] == "happy8_rules_mcp"
+    assert added["server_name"] == "happy8_rules_mcp"
+    assert connected["connected"] is True
+    assert resynced["resynced"] is True
+    assert server_tools[0]["name"] == "validate_plan"
+    assert executed["args"] == {"plan": "{}"}

@@ -1,6 +1,7 @@
 import service from './index'
 
 const LOTTERY_MODEL_PROBE_TIMEOUT_MS = 180000
+const LOTTERY_MODELS_TIMEOUT_MS = 15000
 const LOTTERY_WORLD_TIMELINE_LIMIT = 120
 
 export const getLotteryOverview = () => service.get('/api/lottery/overview')
@@ -11,7 +12,9 @@ export const syncLotteryGraph = (mode = 'zep', force = false) => {
   return service.post('/api/lottery/graph/sync', { mode, force }, { timeout: 0 })
 }
 
-export const getLotteryModels = () => service.get('/api/lottery/models')
+export const getLotteryModels = () => {
+  return service.get('/api/lottery/models', { timeout: LOTTERY_MODELS_TIMEOUT_MS })
+}
 
 export const probeLotteryModel = (modelName) => {
   return service.post(
@@ -33,8 +36,8 @@ export const advanceLotteryWorld = (data) => {
   return service.post('/api/lottery/world/advance', data, { timeout: 0 })
 }
 
-export const evolutionLotteryWorld = (data) => {
-  return service.post('/api/lottery/world/evolution', data, { timeout: 0 })
+export const getLotteryWorldRuntimeReadiness = () => {
+  return service.get('/api/lottery/world/runtime-readiness')
 }
 
 export const getCurrentLotteryWorld = () => {

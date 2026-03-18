@@ -7,7 +7,7 @@
     "setup:backend": "cd backend && node ../scripts/run-uv.js sync",
     "setup:all": "npm run setup && npm run setup:backend",
     "dev": "concurrently --kill-others -n \"backend,frontend\" -c \"green,cyan\" \"npm run backend\" \"npm run frontend\"",
-    "backend": "cd backend && node ../scripts/run-uv.js run python run.py",
+    "backend": "node scripts/start-backend-dev.js",
     "frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build"
   },

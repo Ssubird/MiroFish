@@ -85,7 +85,7 @@ WORLD_ROLES = (
         "LLM-Purchase-Chair",
         "purchase",
         "purchase",
-        "Choose the final Happy 8 purchase plan after comparing play sizes 3/4/5/6 and structures.",
+        "Choose the final Happy 8 purchase plan after comparing all available play sizes and structures.",
     ),
 )
 
@@ -204,6 +204,36 @@ class LotteryWorldRuntime:
         if session_id and self.store.session_exists(session_id):
             timeline_rows = self.store.list_events(session_id, 0, 240, latest=True)["items"]
         return build_recent_draw_stats(assets.completed_draws, timeline_rows)
+
+    def queue_session(self, session_id: str) -> dict[str, Any]:
+        session = self.store.load_session(session_id)
+        if session.get("status") == "queued":
+            return session
+        session["status"] = "queued"
+        session["current_phase"] = "queued"
+        session["failed_phase"] = None
+        session["error"] = None
+        self._persist_session(session)
+        return session
+
+    def fail_session(self, session_id: str, exc: Exception) -> dict[str, Any]:
+        session = self.store.load_session(session_id)
+        message = str(exc)
+        current_error = session.get("error") or {}
+        if session.get("status") == "failed" and current_error.get("message") == message:
+            return session
+        failed_phase = session.get("current_phase") or "idle"
+        session["status"] = "failed"
+        session["failed_phase"] = failed_phase
+        session["current_phase"] = "failed"
+        session["error"] = {
+            "message": message,
+            "phase": failed_phase,
+            "period": session.get("current_period"),
+        }
+        self._persist_session(session)
+        self._append_events(session, [self._status_event(session, "run_failed", message)])
+        return session
 
     def attach_report_artifacts(self, session_id: str, artifacts: dict[str, object]) -> None:
         session = self.store.load_session(session_id)
@@ -895,7 +925,7 @@ class LotteryWorldRuntime:
             f"Debate round: {round_index}\n"
             f"Latest strategy numbers:\n{_debate_snapshot(predictions, strategy_id)}\n"
             f"Latest debate posts:\n{_recent_phase_summary(prior_events, 'public_debate')}\n\n"
-            f"Reply publicly, cite peers if needed, then revise your five numbers if needed.\n{debate_schema(pick_size)}"
+            f"Reply publicly, cite peers if needed, then revise your {pick_size} numbers if needed.\n{debate_schema(pick_size)}"
         )
         payload = parse_json_response(self._send_message(session, agent["letta_agent_id"], prompt))
         numbers = tuple(int(value) for value in payload.get("numbers", [])[:pick_size])
@@ -1008,9 +1038,8 @@ class LotteryWorldRuntime:
             f"Judge rationale: {judge.get('rationale', '')}\n"
             f"Committee discussion:\n{_purchase_committee_summary(proposals.values())}\n"
             f"{purchase_rule_block()}\n"
-            "You must explicitly compare play sizes 3, 4, 5, and 6 before choosing one final executable structure.\n"
             "You may return a mixed portfolio that combines multiple structures and play sizes if total cost stays within budget.\n"
-            "Do not default to pick-5 singles unless you clearly justify why that dominates tickets/wheel/dan_tuo in the other play sizes.\n"
+            "Do not default to single-ticket plans unless you clearly justify why that dominates tickets/wheel/dan_tuo in the other play sizes.\n"
             f"Return the final {budget_yuan}-yuan plan.\n{purchase_schema()}"
         )
         planner_raw = self._send_message(session, _agent_by_id(session, "purchase_chair")["letta_agent_id"], chair_prompt)
@@ -1018,7 +1047,7 @@ class LotteryWorldRuntime:
         if planner.get("plan_type") != "portfolio" and "play_size" not in planner:
             raise ValueError(f"purchase_chair returned purchase plan without play_size: {planner_raw}")
         try:
-            structure = planner_structure(planner, 5, max_tickets)
+            structure = planner_structure(planner, session["pick_size"], max_tickets)
         except Exception as exc:
             raise ValueError(f"purchase_chair returned invalid purchase plan: {planner_raw}") from exc
         payout = _purchase_payout(structure.tickets, actual_numbers)
@@ -1682,9 +1711,8 @@ def _purchase_prompt(current_issue: str, judge: dict[str, Any], summary: str | N
     lines.extend(
         [
             "Return one structured purchase proposal.",
-            "You must explicitly compare play sizes 3, 4, 5, and 6 before choosing one.",
             "You may return a mixed portfolio that combines multiple structures and play sizes within budget.",
-            "Do not default to pick-5 singles unless you justify why other play sizes and structures are inferior here.",
+            "Do not default to single-ticket plans unless you justify why other play sizes and structures are inferior here.",
             purchase_schema(),
         ]
     )
@@ -1961,6 +1989,7 @@ def _session_dataclass(session):
         current_period=session.get("current_period"),
         active_agent_ids=tuple(session.get("active_agent_ids", [])),
         shared_memory=session.get("shared_memory", {}),
+        agent_block_schema_version=int(session.get("agent_block_schema_version", 0) or 0),
         agents=tuple(WorldAgentRef(**item) for item in session.get("agents", [])),
         agent_state=session.get("agent_state", {}),
         request_metrics=session.get("request_metrics", {}),

@@ -53,7 +53,7 @@
         </button>
       </div>
       <span>
-        {{ issueParallelismLocked ? 'world_v1 固定为 1，跨期必须严格因果顺序。' : '并发越高，传统验证越快。' }}
+        {{ issueParallelismLocked ? '持续世界固定为 1，跨期必须严格因果顺序。' : '并发越高，传统验证越快。' }}
       </span>
     </article>
 

@@ -5,6 +5,7 @@ import csv
 from collections import Counter
 from datetime import UTC, datetime
 import hashlib
+import json
 from pathlib import Path
 import re
 import shutil
@@ -16,6 +17,15 @@ import kuzu
 from ...config import Config
 from .constants import GRAPH_RECENT_DRAW_LIMIT
 from .kuzu_graph_state import KuzuGraphState, KuzuGraphStateStore
+from .kuzu_market_runtime import (
+    build_runtime_projection,
+    projection_factions,
+    projection_issue_brief,
+    projection_market_crowding,
+    projection_top_influencers,
+    search_projection,
+    similar_projection_issues,
+)
 from .models import DrawRecord, GraphSnapshot
 from .paths import LOTTERY_ROOT
 from .vocabulary import extract_domain_terms
@@ -23,10 +33,13 @@ from .vocabulary import extract_domain_terms
 
 STATE_FILE = LOTTERY_ROOT / ".kuzu_graph_state.json"
 GRAPH_ID = "kuzu_local"
+RUNTIME_STATE_FILE = "runtime_projection.json"
 WORKSPACE_QUERY = "紫微斗数 快乐8 命盘 历史开奖 四化 宫位 干支 选号"
 NUMBER_PATTERN = re.compile(r"\b(?:[1-9]|[1-7]\d|80)\b")
 NODE_QUERY = "MATCH (n:Entity) RETURN n.id AS id, n.node_kind AS node_kind, n.name AS name, n.source_path AS source_path, n.content AS content, n.period AS period"
 EDGE_QUERY = "MATCH (a:Entity)-[r:Relation]->(b:Entity) RETURN a.id AS source_id, a.name AS source_name, a.period AS source_period, b.id AS target_id, b.name AS target_name, b.period AS target_period, r.relation AS relation, r.weight AS weight"
+RUNTIME_REL_TABLES = ("COVERS_NUMBER", "PLANNED_FOR", "PLACES_PLAN", "FOLLOWS", "TRUSTS", "SCORES_NUMBER", "FOR_ISSUE", "POSTED_SIGNAL")
+RUNTIME_NODE_TABLES = ("BetPlan", "Signal", "NumberNode", "Agent")
 
 
 class KuzuGraphService:
@@ -46,6 +59,10 @@ class KuzuGraphService:
         state = self.state_store.load()
         available = bool(state and Path(state.db_path).exists())
         return {"configured": True, "available": available, "graph_id": state.graph_id if state else GRAPH_ID, "db_path": state.db_path if state else str(self.db_root), "synced_at": state.synced_at if state else None, "node_count": state.node_count if state else 0, "edge_count": state.edge_count if state else 0, "document_count": state.document_count if state else 0, "chart_count": state.chart_count if state else 0, "draw_count": state.draw_count if state else 0, "is_stale": bool(state and workspace_digest and state.workspace_digest != workspace_digest), "workspace_digest": workspace_digest, "stored_digest": state.workspace_digest if state else None}
+
+    def has_synced_workspace(self) -> bool:
+        state = self.state_store.load()
+        return bool(state and Path(state.db_path).exists())
 
     def sync_workspace(self, documents, charts, completed, pending, force: bool = False) -> dict[str, object]:
         digest = self.workspace_digest(documents, charts, completed, pending)
@@ -70,6 +87,36 @@ class KuzuGraphService:
         visible_periods = {draw.period for draw in history_draws}
         visible_periods.add(target_draw.period)
         return self._search_snapshot(self._require_state(graph_id), self._prediction_query(history_draws, target_draw), len(charts), visible_periods)
+
+    def project_runtime_state(self, session: dict[str, object]) -> dict[str, object]:
+        self._require_state(None)
+        projection = build_runtime_projection(session)
+        conn = self._connection()
+        self._reset_runtime_schema(conn)
+        self._copy_runtime_projection(conn, projection)
+        self._write_runtime_projection(projection)
+        return projection
+
+    def runtime_projection(self) -> dict[str, object]:
+        return self._read_runtime_projection()
+
+    def search_market(self, query: str, limit: int = 5) -> list[dict[str, object]]:
+        return search_projection(self.runtime_projection(), query, limit)
+
+    def similar_issues(self, period: str, limit: int = 3) -> list[dict[str, object]]:
+        return similar_projection_issues(self.runtime_projection(), period, limit)
+
+    def top_influencers(self, limit: int = 5) -> list[dict[str, object]]:
+        return projection_top_influencers(self.runtime_projection(), limit)
+
+    def detect_factions(self) -> list[dict[str, object]]:
+        return projection_factions(self.runtime_projection())
+
+    def market_crowding(self, numbers: list[int]) -> float:
+        return projection_market_crowding(self.runtime_projection(), numbers)
+
+    def issue_brief(self, period: str | None = None) -> str:
+        return projection_issue_brief(self.runtime_projection(), period)
 
     def _state_snapshot(self, conn, digest: str, documents, charts, completed, pending) -> KuzuGraphState:
         node_count = sum(self._count(conn, f"MATCH (n:{t}) RETURN count(n) AS count") for t in ["EvidenceDoc", "Concept", "Issue"])
@@ -144,6 +191,7 @@ class KuzuGraphService:
         conn.execute("CREATE REL TABLE MENTIONS(FROM EvidenceDoc TO Concept, weight DOUBLE)")
         conn.execute("CREATE REL TABLE HAS_TERM(FROM EvidenceDoc TO Concept, weight DOUBLE)")
         conn.execute("CREATE REL TABLE HAS_ENERGY(FROM Issue TO Concept, weight DOUBLE)")
+        self._create_runtime_schema(conn)
 
 
     def _bulk_load(self, conn, documents, charts, completed, pending) -> None:
@@ -202,10 +250,120 @@ class KuzuGraphService:
                 
         return doc_rows, list(concept_map.values()), issue_rows, rel_rows
 
-    def _write_csv(self, path: Path, header: tuple[str, ...], rows: list[tuple[object, ...]]) -> str:
+    def _create_runtime_schema(self, conn: kuzu.Connection) -> None:
+        conn.execute("CREATE NODE TABLE Agent(id STRING, display_name STRING, group_label STRING, role_kind STRING, PRIMARY KEY(id))")
+        conn.execute("CREATE NODE TABLE Signal(id STRING, strategy_id STRING, comment STRING, regime_label STRING, PRIMARY KEY(id))")
+        conn.execute("CREATE NODE TABLE BetPlan(id STRING, persona_id STRING, display_name STRING, plan_type STRING, rationale STRING, PRIMARY KEY(id))")
+        conn.execute("CREATE NODE TABLE NumberNode(id STRING, value INT64, PRIMARY KEY(id))")
+        conn.execute("CREATE REL TABLE POSTED_SIGNAL(FROM Agent TO Signal, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE FOR_ISSUE(FROM Signal TO Issue, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE SCORES_NUMBER(FROM Signal TO NumberNode, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE TRUSTS(FROM Agent TO Agent, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE FOLLOWS(FROM BetPlan TO Agent, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE PLACES_PLAN(FROM Agent TO BetPlan, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE PLANNED_FOR(FROM BetPlan TO Issue, weight DOUBLE)")
+        conn.execute("CREATE REL TABLE COVERS_NUMBER(FROM BetPlan TO NumberNode, weight DOUBLE)")
+
+    def _reset_runtime_schema(self, conn: kuzu.Connection) -> None:
+        for table in RUNTIME_REL_TABLES:
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
+        for table in RUNTIME_NODE_TABLES:
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
+        self._create_runtime_schema(conn)
+
+    def _copy_runtime_projection(self, conn: kuzu.Connection, projection: dict[str, object]) -> None:
+        issue = dict(projection.get("issue", {}))
+        rows = {
+            "agents": [
+                (item["id"], item["display_name"], item["group"], item["role_kind"])
+                for item in projection.get("agents", [])
+            ],
+            "signals": [
+                (item["id"], item["strategy_id"], item["comment"], item["regime_label"])
+                for item in projection.get("signals", [])
+            ],
+            "plans": [
+                (item["id"], item["persona_id"], item["display_name"], item["plan_type"], item["rationale"])
+                for item in projection.get("bet_plans", [])
+            ],
+            "numbers": [
+                (item["id"], int(item["value"]))
+                for item in projection.get("numbers", [])
+            ],
+            "posted": [
+                (item["source_id"], item["signal_id"], float(item["weight"]))
+                for item in projection.get("posted_signal_edges", [])
+            ],
+            "signal_issue": [
+                (item["signal_id"], item["issue_id"], float(item["weight"]))
+                for item in projection.get("signal_issue_edges", [])
+            ],
+            "score_number": [
+                (item["signal_id"], item["number_id"], float(item["weight"]))
+                for item in projection.get("scores_number_edges", [])
+            ],
+            "trust": [
+                (item["source_id"], item["target_id"], float(item["weight"]))
+                for item in projection.get("trust_edges", [])
+            ],
+            "follow": [
+                (item["source_id"], item["target_id"], float(item["weight"]))
+                for item in projection.get("follow_edges", [])
+            ],
+            "places_plan": [
+                (item["persona_id"], item["id"], 1.0)
+                for item in projection.get("bet_plans", [])
+                if item.get("persona_id")
+            ],
+            "planned_for": [
+                (item["id"], issue["id"], 1.0)
+                for item in projection.get("bet_plans", [])
+                if issue.get("id")
+            ],
+            "covers_number": [
+                (item["id"], f"number:{int(number)}", 1.0)
+                for item in projection.get("bet_plans", [])
+                for number in item.get("numbers", [])
+            ],
+        }
+        with tempfile.TemporaryDirectory(dir=str(self.db_root.parent)) as temp_dir:
+            self._copy_runtime_table(conn, Path(temp_dir), "Agent", ("id", "display_name", "group_label", "role_kind"), rows["agents"])
+            self._copy_runtime_table(conn, Path(temp_dir), "Signal", ("id", "strategy_id", "comment", "regime_label"), rows["signals"])
+            self._copy_runtime_table(conn, Path(temp_dir), "BetPlan", ("id", "persona_id", "display_name", "plan_type", "rationale"), rows["plans"])
+            self._copy_runtime_table(conn, Path(temp_dir), "NumberNode", ("id", "value"), rows["numbers"])
+            self._copy_runtime_table(conn, Path(temp_dir), "POSTED_SIGNAL", ("from", "to", "weight"), rows["posted"])
+            self._copy_runtime_table(conn, Path(temp_dir), "FOR_ISSUE", ("from", "to", "weight"), rows["signal_issue"])
+            self._copy_runtime_table(conn, Path(temp_dir), "SCORES_NUMBER", ("from", "to", "weight"), rows["score_number"])
+            self._copy_runtime_table(conn, Path(temp_dir), "TRUSTS", ("from", "to", "weight"), rows["trust"])
+            self._copy_runtime_table(conn, Path(temp_dir), "FOLLOWS", ("from", "to", "weight"), rows["follow"])
+            self._copy_runtime_table(conn, Path(temp_dir), "PLACES_PLAN", ("from", "to", "weight"), rows["places_plan"])
+            self._copy_runtime_table(conn, Path(temp_dir), "PLANNED_FOR", ("from", "to", "weight"), rows["planned_for"])
+            self._copy_runtime_table(conn, Path(temp_dir), "COVERS_NUMBER", ("from", "to", "weight"), rows["covers_number"])
+
+    def _copy_runtime_table(self, conn, temp_dir: Path, table: str, header: tuple[str, ...], rows: list[tuple[object, ...]]) -> None:
+        if not rows:
+            return
+        csv_path = self._write_csv(temp_dir / f"{table.lower()}.csv", header, rows)
+        conn.execute(f'COPY {table} FROM "{csv_path}" (PARALLEL=FALSE)')
+
+    def _runtime_projection_file(self) -> Path:
+        return self.db_root.parent / f"{self.db_root.name}.{RUNTIME_STATE_FILE}"
+
+    def _write_runtime_projection(self, projection: dict[str, object]) -> None:
+        path = self._runtime_projection_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(projection, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _read_runtime_projection(self) -> dict[str, object]:
+        path = self._runtime_projection_file()
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _write_csv(self, path: Path, columns: tuple[str, ...], rows: list[tuple[object, ...]]) -> str:
+        del columns
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(header)
             writer.writerows(rows)
         return path.as_posix()
 

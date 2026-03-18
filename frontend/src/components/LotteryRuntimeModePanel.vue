@@ -45,7 +45,7 @@
     </label>
 
     <p class="helper">
-      `world_v1` 是当前主流程：保留状态、按日推进、自动结算上一期并继续讨论下一期。
+      `world_v2_market` 是当前主流程：保留状态、按日推进、自动结算上一期，并在社会传播、评委重排和投注人格之间继续协作。
       `legacy` 作为对照回测保留在高级路径里。
     </p>
   </section>
@@ -55,7 +55,7 @@
 defineProps({
   modelValue: {
     type: String,
-    default: 'world_v1'
+    default: 'world_v2_market'
   },
   warmupSize: {
     type: Number,
@@ -71,9 +71,9 @@ defineEmits(['update:modelValue', 'update:liveInterviewEnabled'])
 
 const runtimeModes = [
   {
-    value: 'world_v1',
-    label: '持续世界',
-    note: '持久状态、时间线、真人追问、购买委员会。'
+    value: 'world_v2_market',
+    label: '市场持续世界',
+    note: '持久状态、时间线、社会传播、评委重排和市场综合。'
   },
   {
     value: 'legacy',

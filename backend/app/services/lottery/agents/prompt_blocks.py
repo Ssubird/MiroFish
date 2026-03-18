@@ -20,7 +20,7 @@ WORLD_ISSUE_LIMIT = 3
 WORLD_POST_LIMIT = 4
 WORLD_INTERVIEW_LIMIT = 3
 MANUAL_REPORT_NOTE = (
-    "prediction_report.md 仅供人工参考，当前持续世界不会把它喂给 agent、grounding 或购买委员会。"
+    "prediction_report.md 会被摘要为历史证据，可进入讨论、购买和复盘，但不能被当成未来开奖泄漏。"
 )
 
 
@@ -89,8 +89,10 @@ def prompt_summary(context, agent_id: str = "") -> str:
 
 
 def named_report_summary(context, name: str) -> str:
-    del context
-    return f"{name}: {MANUAL_REPORT_NOTE}"
+    reports = [item for item in context.knowledge_documents if item.kind == "report" and item.name == name]
+    if not reports:
+        return f"{name}: No report found."
+    return f"{name}: {_content_excerpt(reports[0].content)}"
 
 
 def report_summary(context) -> str:

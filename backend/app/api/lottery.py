@@ -6,6 +6,7 @@ from . import lottery_bp
 from ..config import Config
 from ..services.lottery import LotteryResearchService
 from ..services.lottery.world_jobs import WorldRunManager
+from ..services.lottery.world_runtime_readiness import WorldRuntimePreflightError
 from ..services.lottery.constants import (
     DEFAULT_AGENT_DIALOGUE_ENABLED,
     DEFAULT_AGENT_DIALOGUE_ROUNDS,
@@ -133,6 +134,17 @@ def start_lottery_world():
     return advance_lottery_world()
 
 
+@lottery_bp.route("/world/runtime-readiness", methods=["GET"])
+def get_lottery_world_runtime_readiness():
+    runtime_mode = request.args.get("runtime_mode", WORLD_V2_MARKET_RUNTIME_MODE, type=str).strip()
+    try:
+        data = service.get_world_runtime_readiness(runtime_mode or WORLD_V2_MARKET_RUNTIME_MODE)
+        return jsonify({"success": True, "data": data})
+    except Exception as exc:
+        logger.exception("Failed to load world runtime readiness")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @lottery_bp.route("/world/advance", methods=["POST"])
 def advance_lottery_world():
     payload = request.get_json(silent=True) or {}
@@ -140,36 +152,17 @@ def advance_lottery_world():
     if strategy_ids is not None and not isinstance(strategy_ids, list):
         return jsonify({"success": False, "error": "strategy_ids must be an array"}), 400
     params = _backtest_params(payload)
-    params["runtime_mode"] = WORLD_V1_RUNTIME_MODE
+    params["runtime_mode"] = WORLD_V2_MARKET_RUNTIME_MODE
     try:
+        service.ensure_world_runtime_ready(params["runtime_mode"])
         data = world_runs.start(service, strategy_ids, params)
         return jsonify({"success": True, "data": data}), 202
+    except WorldRuntimePreflightError as exc:
+        return _preflight_error_response(exc)
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:
         logger.exception("Failed to start lottery world session")
-        return jsonify({"success": False, "error": str(exc)}), 500
-
-
-@lottery_bp.route("/world/evolution", methods=["POST"])
-def evolution_lottery_world():
-    payload = request.get_json(silent=True) or {}
-    strategy_ids = payload.get("strategy_ids")
-    iterations = int(payload.get("iterations", 3))
-    if strategy_ids is not None and not isinstance(strategy_ids, list):
-        return jsonify({"success": False, "error": "strategy_ids must be an array"}), 400
-    if iterations < 1:
-        return jsonify({"success": False, "error": "iterations must be at least 1"}), 400
-        
-    params = _backtest_params(payload)
-    params["runtime_mode"] = WORLD_V2_MARKET_RUNTIME_MODE
-    try:
-        data = world_runs.start_evolution(service, strategy_ids, params, iterations)
-        return jsonify({"success": True, "data": data}), 202
-    except ValueError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    except Exception as exc:
-        logger.exception("Failed to start lottery evolutionary world session")
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
@@ -289,7 +282,7 @@ def _backtest_params(payload: dict[str, object]) -> dict[str, object]:
         "live_interview_enabled": bool(payload.get("live_interview_enabled", DEFAULT_LIVE_INTERVIEW_ENABLED)),
         "budget_yuan": int(payload.get("budget_yuan", DEFAULT_BUDGET_YUAN)),
         "session_id": str(payload.get("session_id", "")).strip() or None,
-        "target_period": str(payload.get("target_period", "")).strip() or None,
+        "visible_through_period": _optional_string(payload.get("visible_through_period")),
     }
 
 
@@ -301,3 +294,24 @@ def _sync_graph(mode: str, force: bool) -> dict[str, object]:
     if mode == LOCAL_GRAPH_MODE:
         raise ValueError("local mode does not need sync")
     raise ValueError(f"unknown graph sync mode: {mode}")
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _preflight_error_response(exc: WorldRuntimePreflightError):
+    readiness = exc.readiness
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": readiness.get("blocking_message") or str(exc),
+                "data": readiness,
+            }
+        ),
+        412,
+    )

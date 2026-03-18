@@ -20,6 +20,21 @@ from .helpers import (
 
 GROUP = "data"
 SHORT_WINDOW = 12
+RECENT_BOARD_WINDOW = 50
+FREQUENCY_WEIGHT = 10.0
+RECENCY_WEIGHT = 0.2
+
+
+def _recent_board_scores(segment) -> dict[int, float]:
+    counts = Counter(number for draw in segment for number in draw.numbers)
+    last_seen = {number: -1 for number in range(1, 81)}
+    for index, draw in enumerate(segment, start=1):
+        for number in draw.numbers:
+            last_seen[number] = index
+    return {
+        number: counts[number] * FREQUENCY_WEIGHT + last_seen[number] * RECENCY_WEIGHT
+        for number in range(1, 81)
+    }
 
 
 @dataclass(frozen=True)
@@ -41,7 +56,7 @@ class ColdWindowAgent(StrategyAgent):
             display_name=self.display_name,
             group=self.group,
             numbers=select_numbers(scores, pick_size),
-            rationale=f"优先选择最近 {self.window} 期内出现偏少且遗漏拉长的号码。",
+            rationale=f"Rank by coldness and miss streak over the last {self.window} draws.",
             ranked_scores=rank_scores(scores, pick_size),
         )
 
@@ -60,7 +75,7 @@ class MissStreakAgent(StrategyAgent):
             display_name=self.display_name,
             group=self.group,
             numbers=select_numbers(scores, pick_size),
-            rationale=f"按最近 {self.window} 期的遗漏长度排序，偏向长缺口号码。",
+            rationale=f"Rank by raw miss streak over the last {self.window} draws.",
             ranked_scores=rank_scores(scores, pick_size),
         )
 
@@ -85,7 +100,7 @@ class MomentumShiftAgent(StrategyAgent):
             display_name=self.display_name,
             group=self.group,
             numbers=select_numbers(scores, pick_size),
-            rationale=f"比较最近 {SHORT_WINDOW} 期与 {self.window} 期的频次差，捕捉升温号码。",
+            rationale=f"Compare the last {SHORT_WINDOW} draws against the last {self.window} draws.",
             ranked_scores=rank_scores(scores, pick_size),
         )
 
@@ -112,16 +127,36 @@ class StructureBalanceAgent(StrategyAgent):
             display_name=self.display_name,
             group=self.group,
             numbers=select_numbers(scores, pick_size),
-            rationale="优先补足近期弱势分区和尾数组合，避免号码过度集中。",
+            rationale="Balance weak regions and tail groups to avoid over-crowding.",
             ranked_scores=rank_scores(scores, pick_size),
+        )
+
+
+@dataclass(frozen=True)
+class RecentBoardAgent(StrategyAgent):
+    window: int
+
+    def predict(self, context, pick_size: int) -> StrategyPrediction:
+        self.ensure_history(context)
+        segment = recent_history(context.history_draws, self.window)
+        scores = _recent_board_scores(segment)
+        return StrategyPrediction(
+            strategy_id=self.strategy_id,
+            display_name=self.display_name,
+            group=self.group,
+            numbers=select_numbers(scores, pick_size),
+            rationale="Recent 50-issue board ranked by frequency with recency tie-breaks.",
+            ranked_scores=rank_scores(scores, pick_size),
+            metadata={"window": self.window},
         )
 
 
 def build_data_agents() -> dict[str, StrategyAgent]:
     agents = [
-        ColdWindowAgent("cold_50", "冷号-50期", "结合冷号与遗漏长度排序。", 50, GROUP, window=50),
-        MissStreakAgent("miss_120", "遗漏-120期", "按最近 120 期遗漏长度排序。", 120, GROUP, window=120),
-        MomentumShiftAgent("momentum_60", "动量-60期", "比较短窗和长窗频次差，抓升温号码。", 60, GROUP, window=60),
-        StructureBalanceAgent("structure_90", "结构均衡-90期", "按分区和尾数的弱势结构补位。", 90, GROUP, window=90),
+        ColdWindowAgent("cold_50", "Cold Board 50", "Cold and miss streak board.", 50, GROUP, window=50),
+        MissStreakAgent("miss_120", "Miss Board 120", "Longest miss streak board.", 120, GROUP, window=120),
+        MomentumShiftAgent("momentum_60", "Momentum Board 60", "Short-vs-long momentum board.", 60, GROUP, window=60),
+        StructureBalanceAgent("structure_90", "Structure Board 90", "Region and tail balance board.", 90, GROUP, window=90),
+        RecentBoardAgent("recent_board_50", "Recent Board 50", "Recent 50 issue number board.", RECENT_BOARD_WINDOW, GROUP, window=RECENT_BOARD_WINDOW),
     ]
     return {agent.strategy_id: agent for agent in agents}

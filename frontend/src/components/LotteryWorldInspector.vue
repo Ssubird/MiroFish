@@ -12,27 +12,172 @@
     </header>
 
     <div class="summary-grid">
-      <article class="summary-card"><span>状态</span><strong>{{ session?.status || '-' }}</strong></article>
-      <article class="summary-card"><span>阶段</span><strong>{{ phaseLabel(session?.current_phase) }}</strong></article>
-      <article class="summary-card"><span>目标期</span><strong>{{ session?.current_period || latestPrediction?.period || '-' }}</strong></article>
-      <article class="summary-card"><span>模型</span><strong>{{ activeModelName || '-' }}</strong></article>
+      <article class="summary-card">
+        <span>状态</span>
+        <strong>{{ session?.status || '-' }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>阶段</span>
+        <strong>{{ phaseLabel(session?.current_phase) }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>截止期</span>
+        <strong>{{ session?.visible_through_period || latestPrediction?.visible_through_period || '-' }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>预测期</span>
+        <strong>{{ latestPrediction?.predicted_period || latestPrediction?.period || '-' }}</strong>
+      </article>
     </div>
+
+    <article class="section-card status-card">
+      <div class="section-head">
+        <h3>进度</h3>
+        <span>{{ activeModelName || '-' }}</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip">{{ phaseLabel(session?.current_phase) }}</span>
+        <span class="chip">{{ progress.current_actor_name || '等待执行' }}</span>
+        <span class="chip">
+          讨论 {{ progress.dialogue_round_index || 0 }}/{{ progress.dialogue_round_total || 0 }}
+        </span>
+      </div>
+      <p class="status-banner">{{ progress.completion_message || '等待下一步操作' }}</p>
+    </article>
+
+    <article class="section-card focus-card" :class="{ 'is-active': finalDecision }">
+      <div class="section-head">
+        <h3>官方最终结论</h3>
+        <span>{{ finalDecision?.period || latestPrediction?.predicted_period || '-' }}</span>
+      </div>
+      <div class="chip-row">
+        <span v-for="num in finalDecision?.numbers || latestPrediction?.ensemble_numbers || []" :key="`f-${num}`" class="chip primary">{{ num }}</span>
+        <span v-for="num in finalDecision?.alternate_numbers || latestPrediction?.alternate_numbers || []" :key="`fa-${num}`" class="chip alt">{{ num }}</span>
+      </div>
+      <p>{{ shortText(finalDecision?.rationale, 240) || '本轮还没有形成官方终判。' }}</p>
+      <p class="muted">{{ shortText(finalDecision?.risk_note, 180) }}</p>
+    </article>
+
+    <div class="stack-grid">
+      <article class="section-card compact">
+        <div class="section-head">
+          <h3>购买建议</h3>
+          <span>{{ latestPurchasePlan?.plan_type || latestPurchasePlan?.status || '-' }}</span>
+        </div>
+        <div class="chip-row">
+          <span class="chip">{{ latestPurchasePlan?.play_size ? `选${latestPurchasePlan.play_size}` : '-' }}</span>
+          <span class="chip">{{ latestPurchasePlan?.ticket_count || 0 }} 注</span>
+          <span class="chip">{{ latestPurchasePlan?.total_cost_yuan || budgetYuan || 0 }} 元</span>
+        </div>
+        <p>{{ shortText(latestPurchasePlan?.rationale || latestPurchasePlan?.chosen_edge, 180) || '购买建议尚未生成。' }}</p>
+      </article>
+
+      <article class="section-card compact">
+        <div class="section-head">
+          <h3>最新复盘</h3>
+          <span>{{ latestReview?.period || '-' }}</span>
+        </div>
+        <div class="chip-row">
+          <span class="chip">官方命中 {{ latestReview?.official_hits ?? '-' }}</span>
+          <span class="chip">收益 {{ latestReview?.purchase_profit ?? '-' }}</span>
+          <span class="chip">ROI {{ latestReview?.purchase_roi ?? '-' }}</span>
+        </div>
+        <p>{{ shortText(latestReview?.summary, 180) || '当前还没有复盘结果。' }}</p>
+      </article>
+    </div>
+
+    <article class="section-card">
+      <div class="section-head">
+        <h3>生成组结论</h3>
+        <span>{{ generatorBoards.length }}</span>
+      </div>
+      <div v-if="!generatorBoards.length" class="empty-log">当前还没有生成组结果。</div>
+      <div v-else class="event-list">
+        <div v-for="item in generatorBoards" :key="item.strategy_id" class="event-item">
+          <strong>{{ item.strategy_id }}</strong>
+          <span>{{ groupLabel(item.regime_label || item.group || '-') }}</span>
+          <p>Top: {{ topNumbers(item) }}</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="section-card">
+      <div class="section-head">
+        <h3>市场讨论</h3>
+        <span>{{ marketPosts.length + judgeBoards.length }}</span>
+      </div>
+      <div v-if="!marketPosts.length && !judgeBoards.length" class="empty-log">当前还没有市场讨论记录。</div>
+      <div v-else class="event-list">
+        <div v-for="item in marketPosts" :key="item.event_id || `social-${item.actor_id}`" class="event-item">
+          <strong>{{ item.actor_display_name || item.actor_id }}</strong>
+          <span>市场发言</span>
+          <p>{{ shortText(item.content, 160) }}</p>
+        </div>
+        <div v-for="item in judgeBoards" :key="item.event_id || `judge-${item.actor_id}`" class="event-item">
+          <strong>{{ item.actor_display_name || item.actor_id }}</strong>
+          <span>裁判意见</span>
+          <p>{{ shortText(item.content, 160) }}</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="section-card">
+      <div class="section-head">
+        <h3>命中总账</h3>
+        <span>{{ issueLedger.length }}</span>
+      </div>
+      <div v-if="!issueLedger.length" class="empty-log">当前还没有已结算期数。</div>
+      <div v-else class="event-list">
+        <div v-for="item in issueLedger.slice().reverse()" :key="item.predicted_period" class="event-item">
+          <strong>{{ item.predicted_period }} 期</strong>
+          <span>命中 {{ item.official_hits }} / 收益 {{ item.purchase_recommendation?.profit_yuan ?? '-' }}</span>
+          <p>
+            官方 {{ listLine(item.official_prediction) }} / 实际 {{ listLine(item.actual_numbers) }}
+          </p>
+        </div>
+      </div>
+    </article>
+
+    <article class="section-card">
+      <div class="section-head">
+        <h3>文件与报告</h3>
+        <span>{{ reportArtifacts?.run_id || '-' }}</span>
+      </div>
+      <div class="event-list">
+        <div class="event-item">
+          <strong>运行报告</strong>
+          <span>{{ reportArtifacts?.markdown_path || '-' }}</span>
+          <p>{{ reportArtifacts?.json_path || '-' }}</p>
+        </div>
+        <div v-if="reportArtifacts?.issue_ledger" class="event-item">
+          <strong>命中总账</strong>
+          <span>{{ reportArtifacts.issue_ledger.markdown_path }}</span>
+          <p>{{ reportArtifacts.issue_ledger.json_path }}</p>
+        </div>
+        <div
+          v-for="item in reportArtifacts?.issue_reports || []"
+          :key="item.predicted_period"
+          class="event-item"
+        >
+          <strong>{{ item.predicted_period }} 期报告</strong>
+          <span>{{ item.markdown_path }}</span>
+          <p>{{ item.json_path }}</p>
+        </div>
+      </div>
+    </article>
 
     <article class="section-card focus-card" :class="{ 'is-active': selectedGraphNode }">
       <div class="section-head">
         <h3>选中节点</h3>
         <span>{{ selectedGraphNode?.label || '-' }}</span>
       </div>
-      <p v-if="!selectedGraphNode" class="muted">点击左侧图表节点后，此处将自动显示节点详情。</p>
+      <p v-if="!selectedGraphNode" class="muted">点击中间图谱节点后，这里会显示辅助详情。</p>
       <template v-else>
         <div class="chip-row">
           <span class="chip">{{ nodeTypeLabel(selectedGraphNode.node_type) }}</span>
           <span class="chip">{{ nodeScope(selectedGraphNode) }}</span>
         </div>
-        <div class="focus-content">
-          <p>{{ selectedGraphNode.summary || selectedGraphNode.comment || selectedGraphNode.meta || '-' }}</p>
-          <div class="focus-meta">号码：{{ (selectedGraphNode.numbers || []).join(' / ') || '-' }}</div>
-        </div>
+        <p>{{ selectedGraphNode.summary || selectedGraphNode.comment || '-' }}</p>
       </template>
     </article>
 
@@ -41,63 +186,20 @@
         <h3>选中号码</h3>
         <span>{{ selectedNumberDetail?.number || '-' }}</span>
       </div>
-      <p v-if="!selectedNumberDetail" class="muted">点击底部 1-80 号码板，此处将显示最近轨迹。</p>
+      <p v-if="!selectedNumberDetail" class="muted">点击底部号码板后，这里会显示最近轨迹。</p>
       <template v-else>
         <div class="chip-row">
           <span class="chip">出现 {{ selectedNumberDetail.count }} 次</span>
-          <span class="chip">讨论 {{ selectedNumberDetail.mention_count }} 次</span>
+          <span class="chip">提及 {{ selectedNumberDetail.mention_count }} 次</span>
         </div>
-        <div class="focus-content">
-          <p>最近出现期次：{{ (selectedNumberDetail.periods || []).join(' / ') || '-' }}</p>
-          <div class="focus-meta">高频提及：{{ (selectedNumberDetail.mentioned_by || []).join(' / ') || '-' }}</div>
-        </div>
+        <p>最近期次：{{ (selectedNumberDetail.periods || []).join(' / ') || '-' }}</p>
       </template>
     </article>
 
     <article class="section-card">
       <div class="section-head">
-        <h3>当前预测</h3>
-        <span>{{ latestPrediction?.period || '-' }}</span>
-      </div>
-      <div class="chip-row">
-        <span v-for="num in latestPrediction?.ensemble_numbers || []" :key="`p-${num}`" class="chip primary">{{ num }}</span>
-        <span v-for="num in latestPrediction?.alternate_numbers || []" :key="`a-${num}`" class="chip alt">{{ num }}</span>
-      </div>
-      <p class="muted">{{ shortText(latestPrediction?.judge_decision?.rationale, 180) || '当前还没有形成最终 5+3。' }}</p>
-    </article>
-
-    <div class="stack-grid">
-      <article class="section-card compact">
-        <div class="section-head">
-          <h3>购买方案</h3>
-          <span>{{ latestPurchasePlan?.plan_type || latestPurchasePlan?.status || '-' }}</span>
-        </div>
-        <div class="chip-row">
-          <span class="chip">{{ latestPurchasePlan?.play_size ? `选${latestPurchasePlan.play_size}` : '-' }}</span>
-          <span class="chip">{{ latestPurchasePlan?.ticket_count || 0 }} 注</span>
-          <span class="chip">{{ latestPurchasePlan?.total_cost_yuan || budgetYuan || 0 }} 元</span>
-        </div>
-        <p>{{ shortText(latestPurchasePlan?.planner?.rationale || latestPurchasePlan?.chosen_edge, 150) || '购买委员会尚未定稿。' }}</p>
-      </article>
-
-      <article v-if="latestSettlement" class="section-card compact">
-        <div class="section-head">
-          <h3>最近结算</h3>
-          <span>{{ latestSettlement.period }}</span>
-        </div>
-        <div class="chip-row">
-          <span class="chip">命中 {{ latestSettlement.consensus_hits }}</span>
-          <span class="chip">最佳 {{ latestSettlement.best_hits }}</span>
-          <span class="chip">盈亏 {{ latestSettlement.purchase_profit }}</span>
-        </div>
-        <p class="muted">{{ shortText((latestSettlement.actual_numbers || []).join(' / '), 120) }}</p>
-      </article>
-    </div>
-
-    <article class="section-card">
-      <div class="section-head">
         <h3>深度互动</h3>
-        <span>{{ liveInterviewEnabled ? '会写入世界时间线' : '当前已关闭' }}</span>
+        <span>{{ liveInterviewEnabled ? '会写入时间线' : '当前已关闭' }}</span>
       </div>
       <div class="form-grid">
         <label class="field">
@@ -114,7 +216,7 @@
           <textarea
             :value="prompt"
             rows="3"
-            placeholder="例如：你为什么保留这个号码？当前最大分歧在哪里？"
+            placeholder="例如：你为什么保留这组号码？"
             @input="$emit('update:prompt', $event.target.value)"
           />
         </label>
@@ -127,6 +229,24 @@
       >
         {{ interviewBusy ? '发送中...' : '发送追问' }}
       </button>
+    </article>
+
+    <article class="section-card">
+      <div class="section-head">
+        <h3>执行日志</h3>
+        <span>{{ executionLogs.length }}</span>
+      </div>
+      <div v-if="!executionLogs.length" class="empty-log">当前还没有执行日志。</div>
+      <div v-else class="log-list">
+        <div v-for="entry in executionLogs" :key="entry.log_id || `${entry.created_at}-${entry.code}`" class="log-item">
+          <div class="log-head">
+            <strong :class="`level-${entry.level || 'info'}`">{{ logLevelLabel(entry.level) }}</strong>
+            <span>{{ phaseLabel(entry.phase) }} / {{ formatLogTime(entry.created_at) }}</span>
+          </div>
+          <div class="log-code">{{ entry.code || '-' }}</div>
+          <p>{{ entry.message || '-' }}</p>
+        </div>
+      </div>
     </article>
 
     <article class="section-card">
@@ -148,7 +268,14 @@
 <script setup>
 import { computed } from 'vue'
 
-import { eventLabel, groupLabel, nodeTypeLabel, phaseLabel, shortText } from '../utils/lotteryDisplay'
+import {
+  eventLabel,
+  groupLabel,
+  logLevelLabel,
+  nodeTypeLabel,
+  phaseLabel,
+  shortText
+} from '../utils/lotteryDisplay'
 
 const props = defineProps({
   sessionData: { type: Object, default: null },
@@ -171,11 +298,37 @@ defineEmits(['refresh', 'reset', 'interview', 'update:agentId', 'update:prompt']
 
 const session = computed(() => props.sessionData?.session || null)
 const latestEvents = computed(() => (props.timeline?.items || []).slice(0, 8))
+const executionLogs = computed(() => [...(session.value?.execution_log || [])].reverse().slice(0, 16))
+const progress = computed(() => session.value?.progress || {})
+const finalDecision = computed(() => props.latestPrediction?.final_decision || null)
+const latestReview = computed(() => props.latestPrediction?.latest_review || session.value?.latest_review || null)
+const generatorBoards = computed(() => props.latestPrediction?.generator_boards || [])
+const marketDiscussion = computed(() => props.latestPrediction?.market_discussion || {})
+const marketPosts = computed(() => marketDiscussion.value.social_posts || [])
+const judgeBoards = computed(() => marketDiscussion.value.judge_boards || [])
+const issueLedger = computed(() => session.value?.issue_ledger || [])
+const reportArtifacts = computed(() => session.value?.report_artifacts || props.sessionData?.report_artifacts || null)
 
 const nodeScope = (node) => {
   if (!node) return '-'
   if (node.node_type === 'phase' || node.node_type === 'debate_round') return phaseLabel(node.phase)
   return groupLabel(node.group || '-')
+}
+
+const formatLogTime = (value) => {
+  const text = String(value || '').trim()
+  if (!text) return '-'
+  return text.replace('T', ' ').replace('Z', '')
+}
+
+const listLine = (values) => (values || []).join(' / ') || '-'
+
+const topNumbers = (item) => {
+  const rows = Object.entries(item.number_scores || {})
+    .map(([number, score]) => ({ number, score: Number(score) }))
+    .sort((left, right) => right.score - left.score || Number(left.number) - Number(right.number))
+    .slice(0, 6)
+  return rows.map((row) => row.number).join(' / ') || '-'
 }
 </script>
 
@@ -191,35 +344,16 @@ const nodeScope = (node) => {
   border-radius: 1.5rem;
   border: 1px solid rgba(0, 240, 255, 0.15);
   background: rgba(11, 12, 16, 0.6);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 240, 255, 0.05);
   color: #e0e6ed;
-}
-
-/* Custom Scrollbar */
-.inspector-shell::-webkit-scrollbar {
-  width: 6px;
-}
-.inspector-shell::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 10px;
-}
-.inspector-shell::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.2);
-  border-radius: 10px;
-}
-.inspector-shell::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 240, 255, 0.4);
 }
 
 .summary-grid,
 .stack-grid,
 .event-list,
-.form-grid {
+.form-grid,
+.log-list {
   display: grid;
   gap: 1rem;
-  flex-shrink: 0;
 }
 
 .summary-grid,
@@ -230,84 +364,47 @@ const nodeScope = (node) => {
 .inspector-header,
 .header-actions,
 .section-head,
-.chip-row {
+.chip-row,
+.log-head {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   flex-wrap: wrap;
 }
 
-.inspector-header {
-  flex-shrink: 0;
-}
-
 .inspector-header,
-.section-head {
+.section-head,
+.log-head {
   justify-content: space-between;
 }
 
 .summary-card,
 .section-card,
-.event-item {
+.event-item,
+.log-item {
   display: grid;
   gap: 0.75rem;
-  align-content: start;
-  min-width: 0;
   padding: 1rem;
   border-radius: 1rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
-  transition: all 0.3s ease;
-  flex-shrink: 0;
 }
 
 .focus-card {
-  min-height: 8rem;
   border-color: rgba(0, 240, 255, 0.2);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(0, 240, 255, 0.05) 100%);
-  box-shadow: inset 0 0 15px rgba(0, 240, 255, 0.05);
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
-.focus-card.is-active {
-  border-color: #00f0ff;
-  box-shadow: 0 0 20px rgba(0, 240, 255, 0.3), inset 0 0 20px rgba(0, 240, 255, 0.2);
+.focus-card.is-active,
+.status-card {
   background: rgba(0, 240, 255, 0.08);
-  transform: translateY(-2px);
 }
 
-.focus-card.is-active .section-head h3 {
-  color: #00f0ff;
-  text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
-}
-
-.focus-content {
-  background: rgba(0, 0, 0, 0.4);
-  padding: 0.85rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.focus-content p {
-  line-height: 1.6;
+.status-banner {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.05);
   color: #fff;
-  font-size: 0.95rem;
-}
-
-.focus-meta {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed rgba(255, 255, 255, 0.1);
-  color: #00f0ff;
-  font-family: monospace;
-  font-size: 0.95rem;
-}
-
-.summary-card:hover,
-.section-card:hover,
-.event-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(0, 240, 255, 0.2);
 }
 
 .summary-card strong,
@@ -316,19 +413,10 @@ const nodeScope = (node) => {
 .event-item p,
 .event-item span,
 .section-head span,
-.muted {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.summary-card strong,
-.summary-card span,
-.section-card p,
-.event-item p,
-.event-item span,
 .eyebrow,
 .section-head h3,
-.inspector-header h2 {
+.inspector-header h2,
+.empty-log {
   margin: 0;
 }
 
@@ -336,7 +424,6 @@ const nodeScope = (node) => {
   display: block;
   font-size: 1.15rem;
   color: #fff;
-  margin-top: 0.25rem;
 }
 
 .section-head h3 {
@@ -345,16 +432,13 @@ const nodeScope = (node) => {
   color: #fff;
 }
 
-.section-head span {
-  max-width: 100%;
-  color: #00f0ff;
-  text-align: right;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.chip-row {
-  justify-content: flex-start;
+.section-head span,
+.eyebrow,
+.muted,
+.empty-log,
+.event-item span,
+.log-code {
+  color: #8b9bb4;
 }
 
 .chip {
@@ -365,22 +449,18 @@ const nodeScope = (node) => {
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.05);
   font-size: 0.85rem;
-  font-weight: 500;
-  color: #e0e6ed;
 }
 
 .chip.primary {
   background: rgba(0, 240, 255, 0.15);
   border-color: rgba(0, 240, 255, 0.4);
   color: #00f0ff;
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
 }
 
 .chip.alt {
-  background: rgba(176, 32, 240, 0.15);
-  border-color: rgba(176, 32, 240, 0.4);
-  color: #e0a3ff;
-  box-shadow: 0 0 10px rgba(176, 32, 240, 0.2);
+  background: rgba(255, 193, 77, 0.12);
+  border-color: rgba(255, 193, 77, 0.4);
+  color: #ffc14d;
 }
 
 .ghost-btn,
@@ -395,9 +475,7 @@ textarea {
   border-radius: 999px;
   padding: 0.5rem 1rem;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   font-weight: 600;
-  font-size: 0.9rem;
 }
 
 .ghost-btn {
@@ -406,41 +484,15 @@ textarea {
   color: #a0b2c6;
 }
 
-.ghost-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
 .ghost-btn.danger {
-  color: #ff6b6b;
-  border-color: rgba(255, 107, 107, 0.3);
-  background: rgba(255, 107, 107, 0.1);
-}
-
-.ghost-btn.danger:hover:not(:disabled) {
-  background: rgba(255, 107, 107, 0.2);
   color: #ff8c8c;
-  box-shadow: 0 0 15px rgba(255, 107, 107, 0.2);
+  border-color: rgba(255, 140, 140, 0.35);
 }
 
 .run-btn {
   border: 1px solid rgba(0, 240, 255, 0.4);
   background: rgba(0, 240, 255, 0.1);
   color: #00f0ff;
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.2), inset 0 0 10px rgba(0, 240, 255, 0.1);
-}
-
-.run-btn:hover:not(:disabled) {
-  background: rgba(0, 240, 255, 0.2);
-  box-shadow: 0 0 25px rgba(0, 240, 255, 0.4), inset 0 0 20px rgba(0, 240, 255, 0.2);
-  transform: translateY(-2px);
-  color: #fff;
-}
-
-.run-btn:disabled,
-.ghost-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .field,
@@ -457,63 +509,33 @@ textarea {
   padding: 0.85rem 1rem;
   background: rgba(0, 0, 0, 0.3);
   color: #fff;
-  transition: all 0.3s ease;
-  resize: vertical;
 }
 
-.field select:focus,
-.field textarea:focus {
-  outline: none;
-  border-color: rgba(0, 240, 255, 0.5);
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
-  background: rgba(0, 0, 0, 0.5);
-}
-
-.event-list {
+.event-list,
+.log-list {
   max-height: 18rem;
   overflow: auto;
   padding-right: 0.5rem;
 }
 
-.event-list::-webkit-scrollbar {
-  width: 6px;
-}
-.event-list::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 10px;
-}
-.event-list::-webkit-scrollbar-thumb {
-  background: rgba(0, 240, 255, 0.2);
-  border-radius: 10px;
-}
-
 .event-item strong {
   color: #00f0ff;
-  font-size: 1.05rem;
 }
 
-.event-item span {
-  font-size: 0.85rem;
-  color: #8b9bb4;
+.log-item p {
+  margin: 0;
 }
 
-.event-item p {
-  color: #e0e6ed;
-  line-height: 1.5;
+.level-info {
+  color: #7ce8ff;
 }
 
-.eyebrow,
-.muted,
-.summary-card span,
-.event-item span {
-  color: #8b9bb4;
+.level-warning {
+  color: #ffd66b;
 }
 
-.inspector-header h2 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: 0.02em;
+.level-error {
+  color: #ff8c8c;
 }
 
 @media (max-width: 960px) {
@@ -521,6 +543,7 @@ textarea {
     max-height: none;
     overflow: visible;
   }
+
   .summary-grid,
   .stack-grid {
     grid-template-columns: 1fr;

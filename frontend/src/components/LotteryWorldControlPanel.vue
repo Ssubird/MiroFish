@@ -5,51 +5,90 @@
         <p class="eyebrow">SIMULATOR</p>
         <h2>持续世界模拟器</h2>
       </div>
-      <div class="header-actions" style="display: flex; gap: 0.5rem; align-items: center;">
-        <button type="button" class="run-btn prompt" :disabled="!canAdvance" @click="$emit('evolution')">
-          {{ busy ? '运行中...' : '净化预测' }}
-        </button>
+      <div class="header-actions">
         <button type="button" class="run-btn" :disabled="!canAdvance" @click="$emit('advance')">
-          同步并推进
+          {{ running ? '运行中...' : '按截止期推进一轮' }}
         </button>
       </div>
     </header>
 
+    <LotteryWorldRuntimeReadiness
+      :readiness="runtimeReadiness"
+      :loading="runtimeReadinessLoading"
+    />
+
     <p v-if="runMessage" class="run-message">{{ runMessage }}</p>
 
     <div class="summary-grid">
-      <article class="summary-card"><span>预算</span><strong>{{ budgetYuan }} 元</strong></article>
-      <article class="summary-card"><span>并发</span><strong>x{{ llmParallelism }}</strong></article>
-      <article class="summary-card"><span>讨论轮次</span><strong>{{ agentDialogueRounds }}</strong></article>
-      <article class="summary-card"><span>已选 agent</span><strong>{{ selectedIds.length }}</strong></article>
+      <article class="summary-card">
+        <span>预算</span>
+        <strong>{{ budgetYuan }} 元</strong>
+      </article>
+      <article class="summary-card">
+        <span>并发</span>
+        <strong>x{{ llmParallelism }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>讨论轮数</span>
+        <strong>{{ agentDialogueRounds }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>已选 agent</span>
+        <strong>{{ selectedIds.length }}</strong>
+      </article>
     </div>
 
     <div class="field-grid">
       <label class="field">
         <span>购买预算</span>
-        <input :value="budgetYuan" type="number" min="2" max="500" step="2" @input="$emit('update:budgetYuan', Number($event.target.value || 0))" />
+        <input
+          :value="budgetYuan"
+          type="number"
+          min="2"
+          max="500"
+          step="2"
+          @input="$emit('update:budgetYuan', Number($event.target.value || 0))"
+        />
       </label>
+
       <label class="field">
-        <span>LLM 同阶段并发</span>
-        <input :value="llmParallelism" type="number" min="1" max="32" @input="$emit('update:llmParallelism', Number($event.target.value || 1))" />
+        <span>LLM 并行数</span>
+        <input
+          :value="llmParallelism"
+          type="number"
+          min="1"
+          max="32"
+          @input="$emit('update:llmParallelism', Number($event.target.value || 1))"
+        />
       </label>
+
       <label class="field">
         <span>讨论轮数</span>
-        <input :value="agentDialogueRounds" type="number" min="0" max="3" @input="$emit('update:agentDialogueRounds', Number($event.target.value || 0))" />
+        <input
+          :value="agentDialogueRounds"
+          type="number"
+          min="0"
+          max="5"
+          @input="$emit('update:agentDialogueRounds', Number($event.target.value || 0))"
+        />
       </label>
+
       <label class="field">
-        <span>盲测进化轮数 (Phase 7)</span>
-        <input :value="evolutionIterations" type="number" min="1" max="5" @input="$emit('update:evolutionIterations', Number($event.target.value || 3))" />
-      </label>
-      <label class="field">
-        <span>穿越时空（目标期次）</span>
-        <select :value="targetPeriod" @change="$emit('update:targetPeriod', $event.target.value)">
-          <option value="">最新待开奖</option>
-          <option v-for="period in historyPeriods" :key="period" :value="period">{{ period }} 期</option>
+        <span>可见截止期</span>
+        <select :value="visibleThroughPeriod" @change="$emit('update:visibleThroughPeriod', $event.target.value)">
+          <option value="">使用当前最新已开奖期</option>
+          <option v-for="period in historyPeriods" :key="period" :value="period">
+            {{ period }} 期
+          </option>
         </select>
       </label>
+
       <label class="toggle-field">
-        <input :checked="liveInterviewEnabled" type="checkbox" @change="$emit('update:liveInterviewEnabled', $event.target.checked)" />
+        <input
+          :checked="liveInterviewEnabled"
+          type="checkbox"
+          @change="$emit('update:liveInterviewEnabled', $event.target.checked)"
+        />
         <span>运行时启用人工互动记忆</span>
       </label>
     </div>
@@ -57,22 +96,33 @@
     <div class="field">
       <div class="field-head">
         <span>模型</span>
-        <button type="button" class="ghost-btn" :disabled="llmModelLoading" @click="$emit('probe-model')">测试模型</button>
+        <div class="model-actions">
+          <button type="button" class="ghost-btn" :disabled="llmModelLoading" @click="$emit('load-models')">
+            {{ llmModelLoading ? '读取中...' : '读取列表' }}
+          </button>
+          <button type="button" class="ghost-btn" :disabled="llmModelLoading" @click="$emit('probe-model')">
+            测试模型
+          </button>
+        </div>
       </div>
-      <select :value="selectedModelName" @change="$emit('update:selectedModelName', $event.target.value)">
-        <option value="">使用默认模型</option>
-        <option v-for="model in llmModels" :key="model.id || model.name" :value="model.id || model.name">
-          {{ model.id || model.name }}
+      <select
+        :value="selectedModelName"
+        @change="$emit('update:selectedModelName', $event.target.value)"
+      >
+        <option v-for="model in modelOptions" :key="model.id" :value="model.id">
+          {{ model.label }}
         </option>
       </select>
+      <p v-if="modelListStatus" class="muted">{{ modelListStatus }}</p>
       <p v-if="modelProbeResult" class="muted">{{ modelProbeResult.message }}</p>
     </div>
 
     <div class="field">
       <div class="field-head">
-        <span>生成型 agent</span>
+        <span>生成组 agent</span>
         <button type="button" class="ghost-btn" @click="$emit('select-all')">全选</button>
       </div>
+
       <div class="strategy-grid">
         <label v-for="strategy in strategies" :key="strategy.strategy_id" class="strategy-card">
           <input
@@ -91,9 +141,12 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+
+import LotteryWorldRuntimeReadiness from './LotteryWorldRuntimeReadiness.vue'
 import { groupLabel, kindLabel } from '../utils/lotteryDisplay'
 
-defineProps({
+const props = defineProps({
   strategies: { type: Array, default: () => [] },
   selectedIds: { type: Array, default: () => [] },
   budgetYuan: { type: Number, default: 50 },
@@ -103,19 +156,22 @@ defineProps({
   llmModels: { type: Array, default: () => [] },
   selectedModelName: { type: String, default: '' },
   modelProbeResult: { type: Object, default: null },
+  modelListStatus: { type: String, default: '' },
   llmModelLoading: { type: Boolean, default: false },
+  runtimeReadiness: { type: Object, default: null },
+  runtimeReadinessLoading: { type: Boolean, default: false },
   runMessage: { type: String, default: '' },
   busy: { type: Boolean, default: false },
+  running: { type: Boolean, default: false },
   canAdvance: { type: Boolean, default: false },
-  evolutionIterations: { type: Number, default: 3 },
-  targetPeriod: { type: String, default: '' },
+  visibleThroughPeriod: { type: String, default: '' },
   historyPeriods: { type: Array, default: () => [] }
 })
 
 defineEmits([
   'advance',
-  'evolution',
   'probe-model',
+  'load-models',
   'select-all',
   'toggle-strategy',
   'update:budgetYuan',
@@ -123,9 +179,31 @@ defineEmits([
   'update:agentDialogueRounds',
   'update:liveInterviewEnabled',
   'update:selectedModelName',
-  'update:evolutionIterations',
-  'update:targetPeriod'
+  'update:visibleThroughPeriod'
 ])
+
+const modelOptions = computed(() => {
+  const options = []
+  const seen = new Set()
+  const pushOption = (id, label) => {
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    options.push({ id, label })
+  }
+
+  pushOption(props.selectedModelName, props.selectedModelName)
+  props.llmModels.forEach((model) => {
+    const id = model.id || model.name || ''
+    const label = model.label || id
+    pushOption(id, label)
+  })
+
+  if (!options.length) {
+    options.push({ id: '', label: '使用默认模型' })
+  }
+
+  return options
+})
 </script>
 
 <style scoped>
@@ -155,6 +233,13 @@ defineEmits([
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+
+.header-actions,
+.model-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .summary-grid,
@@ -269,18 +354,20 @@ select {
   padding-right: 0.5rem;
 }
 
-/* Custom Scrollbar */
 .strategy-grid::-webkit-scrollbar {
   width: 6px;
 }
+
 .strategy-grid::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.02);
   border-radius: 10px;
 }
+
 .strategy-grid::-webkit-scrollbar-thumb {
   background: rgba(0, 240, 255, 0.2);
   border-radius: 10px;
 }
+
 .strategy-grid::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 240, 255, 0.4);
 }
@@ -292,14 +379,14 @@ select {
   cursor: pointer;
 }
 
-.strategy-card input[type="checkbox"] {
+.strategy-card input[type='checkbox'] {
   margin-top: 0.25rem;
   accent-color: #00f0ff;
   width: 1.1rem;
   height: 1.1rem;
 }
 
-.strategy-card input[type="checkbox"]:checked + div strong {
+.strategy-card input[type='checkbox']:checked + div strong {
   color: #00f0ff;
   text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
 }

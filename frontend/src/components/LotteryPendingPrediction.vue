@@ -3,30 +3,38 @@
     <div class="panel-header">
       <div>
         <p class="eyebrow">PENDING</p>
-        <h2>当前目标期结论</h2>
+        <h2>当前目标期方案</h2>
       </div>
       <span v-if="pendingPrediction" class="period-pill">{{ pendingPrediction.period }}</span>
     </div>
 
-    <div v-if="!pendingPrediction" class="empty-state">当前没有待预测期，无法展示结论。</div>
+    <div v-if="!pendingPrediction" class="empty-state">当前没有待预测期，暂无可展示的市场方案。</div>
 
     <template v-else>
       <LotteryReportArtifacts :report-artifacts="reportArtifacts" />
 
       <article class="hero-card">
         <div class="result-block">
-          <span class="label">Primary 5</span>
+          <span class="label">参考票</span>
           <div class="ensemble-row">
-            <span v-for="num in pendingPrediction.ensemble_numbers" :key="`ensemble-${num}`" class="number-chip">
+            <span
+              v-for="num in referenceNumbers"
+              :key="`reference-${num}`"
+              class="number-chip"
+            >
               {{ num }}
             </span>
           </div>
         </div>
 
         <div class="result-block">
-          <span class="label">Alternate 3</span>
+          <span class="label">对冲号 / 补位号</span>
           <div class="ensemble-row">
-            <span v-for="num in pendingPrediction.alternate_numbers || []" :key="`alternate-${num}`" class="number-chip alt">
+            <span
+              v-for="num in hedgeNumbers"
+              :key="`hedge-${num}`"
+              class="number-chip alt"
+            >
               {{ num }}
             </span>
           </div>
@@ -34,7 +42,7 @@
 
         <div class="meta-list">
           <span v-if="pendingPrediction.purchase_plan?.plan_type" class="meta-tag">
-            purchase {{ pendingPrediction.purchase_plan.plan_type }}
+            {{ pendingPrediction.purchase_plan.plan_type }}
           </span>
           <span v-if="pendingPrediction.purchase_plan?.play_size" class="meta-tag">
             选{{ pendingPrediction.purchase_plan.play_size }}
@@ -42,37 +50,31 @@
           <span v-if="pendingPrediction.purchase_plan?.ticket_count" class="meta-tag">
             {{ pendingPrediction.purchase_plan.ticket_count }} 注
           </span>
-        </div>
-
-        <div v-if="pendingPrediction.contributors?.length" class="meta-section">
-          <span>融合贡献者</span>
-          <div class="meta-list">
-            <span v-for="item in pendingPrediction.contributors" :key="item.strategy_id" class="meta-tag">
-              {{ groupLabel(item.group) }} / {{ item.display_name }}
-            </span>
-          </div>
+          <span v-if="pendingPrediction.market_synthesis?.total_market_volume_yuan" class="meta-tag">
+            市场成交 {{ pendingPrediction.market_synthesis.total_market_volume_yuan }} 元
+          </span>
         </div>
 
         <div class="breakdown-list">
-          <div v-for="item in pendingPrediction.ensemble_breakdown" :key="item.number" class="breakdown-item">
+          <div v-for="item in scorePreview" :key="item.number" class="breakdown-item">
             <strong>{{ item.number }}</strong>
             <span>{{ item.score }}</span>
-            <p>{{ item.sources.join(' / ') }}</p>
+            <p>市场共识分数</p>
           </div>
         </div>
       </article>
 
       <div class="insight-grid">
-        <article v-if="pendingPrediction.judge_decision" class="insight-card">
+        <article v-if="pendingPrediction.market_synthesis" class="insight-card">
           <div class="card-top">
-            <strong>裁判定稿</strong>
-            <span class="meta-tag">judge</span>
+            <strong>市场综合</strong>
+            <span class="meta-tag">v2</span>
           </div>
-          <p class="rationale">{{ pendingPrediction.judge_decision.rationale }}</p>
+          <p class="rationale">{{ pendingPrediction.market_synthesis.rationale }}</p>
           <div class="meta-list">
             <span
-              v-for="item in pendingPrediction.judge_decision.trusted_strategy_ids || []"
-              :key="`judge-${item}`"
+              v-for="item in pendingPrediction.market_synthesis.trusted_strategy_ids || []"
+              :key="`market-${item}`"
               class="meta-tag"
             >
               {{ item }}
@@ -80,9 +82,43 @@
           </div>
         </article>
 
+        <article v-if="pendingPrediction.signal_outputs?.length" class="insight-card">
+          <div class="card-top">
+            <strong>信号开盘</strong>
+            <span class="meta-tag">{{ pendingPrediction.signal_outputs.length }} 条</span>
+          </div>
+          <div class="stack-list">
+            <div
+              v-for="item in pendingPrediction.signal_outputs.slice(0, 4)"
+              :key="item.strategy_id"
+              class="stack-item"
+            >
+              <strong>{{ item.strategy_id }}</strong>
+              <p>{{ item.public_post || '已生成结构化 signal output' }}</p>
+            </div>
+          </div>
+        </article>
+
+        <article v-if="bettorPlans.length" class="insight-card">
+          <div class="card-top">
+            <strong>投注人格</strong>
+            <span class="meta-tag">{{ bettorPlans.length }} 份</span>
+          </div>
+          <div class="stack-list">
+            <div
+              v-for="item in bettorPlans.slice(0, 4)"
+              :key="item.role_id"
+              class="stack-item"
+            >
+              <strong>{{ item.display_name }}</strong>
+              <p>{{ item.plan_type }} / 选{{ item.play_size }} / {{ item.risk_exposure }}</p>
+            </div>
+          </div>
+        </article>
+
         <article v-if="pendingPrediction.live_interviews?.length" class="insight-card">
           <div class="card-top">
-            <strong>系统采访</strong>
+            <strong>系统访谈</strong>
             <span class="meta-tag">{{ pendingPrediction.live_interviews.length }} 条</span>
           </div>
           <div class="stack-list">
@@ -93,23 +129,6 @@
             >
               <strong>{{ item.agent_id }}</strong>
               <p>{{ shortText(item.answer, 140) }}</p>
-            </div>
-          </div>
-        </article>
-
-        <article v-if="pendingPrediction.world_timeline_preview?.length" class="insight-card">
-          <div class="card-top">
-            <strong>世界预览</strong>
-            <span class="meta-tag">{{ pendingPrediction.world_timeline_preview.length }} 条</span>
-          </div>
-          <div class="stack-list">
-            <div
-              v-for="item in pendingPrediction.world_timeline_preview.slice(0, 4)"
-              :key="item.event_id || item.actor_id + item.created_at"
-              class="stack-item"
-            >
-              <strong>{{ item.actor_display_name || item.actor_id }}</strong>
-              <p>{{ shortText(item.content || item.comment, 140) }}</p>
             </div>
           </div>
         </article>
@@ -136,24 +155,6 @@
           </div>
 
           <p class="rationale">{{ item.rationale }}</p>
-
-          <div v-if="sourceList(item).length" class="meta-section">
-            <span>知识来源</span>
-            <div class="meta-list">
-              <span v-for="source in sourceList(item)" :key="`${item.strategy_id}-${source}`" class="meta-tag">
-                {{ source }}
-              </span>
-            </div>
-          </div>
-
-          <div v-if="focusList(item).length" class="meta-section">
-            <span>关注点</span>
-            <div class="meta-list">
-              <span v-for="focus in focusList(item)" :key="`${item.strategy_id}-${focus}`" class="meta-tag">
-                {{ focus }}
-              </span>
-            </div>
-          </div>
         </article>
       </div>
 
@@ -163,11 +164,13 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+
 import LotteryPurchasePlan from './LotteryPurchasePlan.vue'
 import LotteryReportArtifacts from './LotteryReportArtifacts.vue'
 import { groupLabel, kindLabel, shortText } from '../utils/lotteryDisplay'
 
-defineProps({
+const props = defineProps({
   pendingPrediction: {
     type: Object,
     default: null
@@ -178,8 +181,19 @@ defineProps({
   }
 })
 
-const sourceList = (item) => (Array.isArray(item.metadata?.sources) ? item.metadata.sources : [])
-const focusList = (item) => (Array.isArray(item.metadata?.focus) ? item.metadata.focus : [])
+const marketSynthesis = computed(() => props.pendingPrediction?.market_synthesis || {})
+const referenceNumbers = computed(() => {
+  const numbers = marketSynthesis.value?.reference_leg?.numbers
+  if (Array.isArray(numbers) && numbers.length) return numbers
+  return props.pendingPrediction?.ensemble_numbers || []
+})
+const hedgeNumbers = computed(() => {
+  const numbers = marketSynthesis.value?.hedge_pool
+  if (Array.isArray(numbers) && numbers.length) return numbers
+  return props.pendingPrediction?.alternate_numbers || []
+})
+const scorePreview = computed(() => (marketSynthesis.value?.consensus_number_scores || []).slice(0, 8))
+const bettorPlans = computed(() => Object.values(props.pendingPrediction?.bet_plans || {}))
 </script>
 
 <style scoped>

@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 
 from app.services.lottery.agents.base import StrategyAgent
+from app.services.lottery.kuzu_graph import KuzuGraphService
 from app.services.lottery.models import DrawRecord, EnergySignature, GraphSnapshot, KnowledgeDocument, StrategyPrediction
 from app.services.lottery.report_writer import LotteryReportWriter
 from app.services.lottery.research_service import LotteryResearchService
@@ -16,8 +17,8 @@ class FakeGraphService:
             "prediction",
             3,
             2,
-            ("冷号", "命盘"),
-            {"冷号": 2.0, "命盘": 1.5},
+            ("cold", "命盘"),
+            {"cold": 2.0, "命盘": 1.5},
             tuple(item.name for item in documents),
             len(charts),
             ("document->concept", "draw->concept"),
@@ -39,12 +40,22 @@ class FakeGraphService:
 
 
 class FakeLettaClient:
+    TOOL_NAMES = {
+        "happy8_rules_mcp": ("validate_plan", "price_plan"),
+        "world_state_mcp": ("publish_post", "update_trust"),
+        "kuzu_market_mcp": ("search_docs", "top_influencers"),
+        "report_memory_mcp": ("report_digest", "find_report_evidence"),
+    }
+
     def __init__(self):
         self.blocks = {}
+        self.mcp_servers = {}
+        self.attached_tools = {}
 
     def create_agent(self, name, description, memory_blocks, metadata=None):
         agent_id = f"letta_{name}"
         self.blocks[agent_id] = dict(memory_blocks)
+        self.attached_tools[agent_id] = set()
         return agent_id
 
     def update_block(self, agent_id, block_label, value):
@@ -53,10 +64,37 @@ class FakeLettaClient:
     def add_passage(self, agent_id, text, tags=None):
         return None
 
+    def list_mcp_servers(self):
+        return [{"server_name": name} for name in self.mcp_servers]
+
+    def add_mcp_server(self, config):
+        self.mcp_servers[config["server_name"]] = dict(config)
+        return dict(config)
+
+    def connect_mcp_server(self, config):
+        self.mcp_servers[config["server_name"]] = dict(config)
+        return dict(config)
+
+    def resync_mcp_server_tools(self, server_name, agent_id=None):
+        return {"server_name": server_name, "agent_id": agent_id}
+
+    def list_mcp_tools_by_server(self, server_name):
+        return [
+            {"id": f"{server_name}:{name}", "name": name}
+            for name in self.TOOL_NAMES.get(server_name, ())
+        ]
+
+    def list_tools_for_agent(self, agent_id):
+        return [{"id": tool_id} for tool_id in sorted(self.attached_tools.get(agent_id, set()))]
+
+    def attach_tool_to_agent(self, agent_id, tool_id):
+        self.attached_tools.setdefault(agent_id, set()).add(tool_id)
+        return {"agent_id": agent_id, "tool_id": tool_id}
+
     def send_message(self, agent_id, content):
         if "Answer as the world analyst" in content:
-            return "World Analyst: current disagreement is low and the strongest cluster is 1/2/3/4/5."
-        if "purchase_chair" in agent_id:
+            return "World Analyst: the strongest cluster is still 1/2/3/4/5."
+        if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
             return (
                 '{"plan_style":"balanced","plan_type":"portfolio","play_size":4,'
                 '"play_size_review":{"3":"low edge","4":"best","5":"too concentrated","6":"too loose"},'
@@ -65,15 +103,25 @@ class FakeLettaClient:
                 '"primary_ticket":[1,2,3,4],"core_numbers":[1,2,3],"hedge_numbers":[4,5],'
                 '"avoid_numbers":[10],"trusted_strategy_ids":["cold_rule"],"comment":"chair closes","rationale":"chair closes"}'
             )
-        if "budget_guard" in agent_id or "coverage_builder" in agent_id or "upside_hunter" in agent_id:
+        if "Your persona budget:" in content:
             return (
-                '{"plan_style":"committee","plan_type":"tickets","play_size":4,'
+                '{"plan_style":"market","plan_type":"tickets","play_size":4,'
                 '"play_size_review":{"3":"thin","4":"best","5":"too tight","6":"too diffuse"},'
                 '"chosen_edge":"cover core four","tickets":[[1,2,3,4]],"primary_ticket":[1,2,3,4],'
-                '"core_numbers":[1,2,3],"hedge_numbers":[4,5],"avoid_numbers":[10],"support_role_ids":[],'
+                '"core_numbers":[1,2,3],"hedge_numbers":[4,5],"avoid_numbers":[10],"support_role_ids":[],"trusted_strategy_ids":["cold_rule"],'
                 '"comment":"keep four-core","rationale":"keep four-core"}'
             )
-        return '{"numbers":[1,2,3,4,5],"comment":"stay with cold cluster","support_agent_ids":["cold_rule"],"rationale":"cold remains"}'
+        if '"structure_bias"' in content:
+            return (
+                '{"numbers":[1,2,3,4,5],"comment":"judge keeps cold cluster","rationale":"cold remains",'
+                '"trusted_strategy_ids":["cold_rule"],"play_size_bias":4,"structure_bias":"tickets"}'
+            )
+        if '"highlighted_numbers"' in content:
+            return (
+                '{"comment":"social feed reinforces the cold board","focus":["cold"],"trusted_strategy_ids":["cold_rule"],'
+                '"highlighted_numbers":[1,2,3,4,5],"support_agent_ids":["cold_rule"],"sentiment":"bullish"}'
+            )
+        return '{"comment":"postmortem note","focus":["cold"],"trusted_strategy_ids":["cold_rule"]}'
 
 
 class RuleAgent(StrategyAgent):
@@ -111,14 +159,17 @@ class WorkspaceRepository:
 def test_world_graph_and_recent_stats_and_world_analyst():
     with tempfile.TemporaryDirectory() as temp_dir:
         workspace = _workspace()
+        kuzu_graph_service = KuzuGraphService(db_root=str(Path(temp_dir) / "kuzu"))
         service = LotteryResearchService(
             repository=WorkspaceRepository(workspace),
             graph_service=FakeGraphService(),
+            kuzu_graph_service=kuzu_graph_service,
             report_writer=LotteryReportWriter(Path(temp_dir)),
             world_runtime=LotteryWorldRuntime(
                 FakeGraphService(),
                 store=WorldSessionStore(str(Path(temp_dir) / "world")),
                 letta_client=FakeLettaClient(),
+                kuzu_graph_service=kuzu_graph_service,
             ),
         )
         service.runtime.load_workspace = lambda: workspace  # type: ignore[method-assign]
@@ -139,7 +190,7 @@ def test_world_graph_and_recent_stats_and_world_analyst():
     assert any(node["node_type"] == "agent" for node in graph["nodes"])
     assert any(node["node_type"] == "phase" for node in graph["nodes"])
     assert any(edge["relation"] == "proposed" for edge in graph["edges"])
-    assert any(edge["relation"] == "synthesized_into" for edge in graph["edges"])
+    assert any(edge["relation"] == "purchased_from" for edge in graph["edges"])
     assert len(stats["numbers"]) == 80
     assert stats["window_size"] == 8
     assert stats["numbers"][0]["number"] == 1
@@ -150,7 +201,7 @@ def _workspace() -> WorkspaceAssets:
     docs = (
         KnowledgeDocument("prompt.md", "prompt", "knowledge/prompts/prompt.md", 20, "Use Ziwei prompt.", ("prompt",)),
         KnowledgeDocument("basis.md", "knowledge", "knowledge/learn/basis.md", 20, "冷号与命盘都重要。", ("冷号", "命盘")),
-        KnowledgeDocument("prediction_report.md", "report", "reports/prediction_report.md", 20, "manual only", ("manual",)),
+        KnowledgeDocument("prediction_report.md", "report", "reports/prediction_report.md", 20, "report evidence", ("report",)),
     )
     strategies = {
         "cold_rule": RuleAgent("cold_rule", "Cold Rule", (1, 2, 3, 4, 5)),

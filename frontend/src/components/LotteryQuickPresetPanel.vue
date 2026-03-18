@@ -23,8 +23,8 @@
     </div>
 
     <div class="signal-row">
-      <span>当前模式：{{ runtimeMode === 'world_v1' ? '持续世界' : '经典回测' }}</span>
-      <span v-if="runtimeMode !== 'world_v1'">回测 {{ evaluationSize }} 期</span>
+      <span>当前模式：{{ runtimeMode === 'legacy' ? '经典回测' : '市场持续世界' }}</span>
+      <span v-if="runtimeMode === 'legacy'">回测 {{ evaluationSize }} 期</span>
       <span>同阶段并发 x{{ llmParallelism }}</span>
       <span>预计请求 {{ estimatedCalls }}</span>
     </div>
@@ -33,7 +33,7 @@
 
 <script setup>
 defineProps({
-  runtimeMode: { type: String, default: 'world_v1' },
+  runtimeMode: { type: String, default: 'world_v2_market' },
   evaluationSize: { type: Number, default: 3 },
   llmParallelism: { type: Number, default: 8 },
   estimatedCalls: { type: Number, default: 0 },
@@ -48,13 +48,13 @@ const presets = [
     id: 'world-default',
     title: '标准推进',
     note: '持续世界默认配置，适合日常推进当前目标期。',
-    stats: 'world_v1 / 对话 1 轮 / 并发 x8'
+    stats: 'world_v2_market / 对话 1 轮 / 并发 x8'
   },
   {
     id: 'deep-consensus',
     title: '深度讨论',
     note: '提高讨论强度和并发，适合正式推演。',
-    stats: 'world_v1 / 对话 2 轮 / 并发 x10'
+    stats: 'world_v2_market / 对话 2 轮 / 并发 x10'
   },
   {
     id: 'fast-check',

@@ -135,8 +135,13 @@ def _play_size(planner: dict[str, object], default_pick_size: int) -> int:
 def _ticket_plan(planner: dict[str, object], play_size: int, max_tickets: int) -> TicketStructure:
     tickets = _ticket_list(planner.get("tickets"), play_size)
     if not tickets:
-        primary = _flat_numbers(planner.get("primary_ticket"), play_size)
-        if len(primary) != play_size:
+        primary = _flat_numbers(
+            planner.get("primary_ticket"),
+            play_size,
+            label="primary_ticket",
+            exact_size=play_size,
+        )
+        if not primary:
             raise ValueError("plan_type=tickets requires tickets or a primary_ticket matching play_size")
         tickets = (tuple(primary),)
     _validate_ticket_count(len(tickets), max_tickets, "tickets")
@@ -153,7 +158,11 @@ def _ticket_plan(planner: dict[str, object], play_size: int, max_tickets: int) -
 
 
 def _wheel_plan(planner: dict[str, object], play_size: int, max_tickets: int) -> TicketStructure:
-    wheel_numbers = _flat_numbers(planner.get("wheel_numbers"), _max_pool_size(max_tickets, play_size))
+    wheel_numbers = _flat_numbers(
+        planner.get("wheel_numbers"),
+        _max_pool_size(max_tickets, play_size),
+        label="wheel_numbers",
+    )
     if len(wheel_numbers) < play_size:
         raise ValueError("plan_type=wheel requires wheel_numbers to cover the selected play_size")
     combination_count = comb(len(wheel_numbers), play_size)
@@ -172,12 +181,22 @@ def _wheel_plan(planner: dict[str, object], play_size: int, max_tickets: int) ->
 
 
 def _dan_tuo_plan(planner: dict[str, object], play_size: int, max_tickets: int) -> TicketStructure:
-    banker_numbers = _flat_numbers(planner.get("banker_numbers"), play_size - 1)
-    drag_numbers = [number for number in _flat_numbers(planner.get("drag_numbers"), _max_pool_size(max_tickets, play_size)) if number not in banker_numbers]
+    banker_numbers = _flat_numbers(
+        planner.get("banker_numbers"),
+        play_size - 1,
+        label="banker_numbers",
+    )
+    drag_numbers = _flat_numbers(
+        planner.get("drag_numbers"),
+        _max_pool_size(max_tickets, play_size),
+        label="drag_numbers",
+    )
     if not banker_numbers:
         raise ValueError("plan_type=dan_tuo requires banker_numbers")
     if len(banker_numbers) >= play_size:
         raise ValueError("banker_numbers must be smaller than play_size")
+    if set(banker_numbers) & set(drag_numbers):
+        raise ValueError("banker_numbers and drag_numbers must not overlap")
     remaining = play_size - len(banker_numbers)
     if len(drag_numbers) < remaining:
         raise ValueError("drag_numbers are insufficient for the selected play_size")
@@ -215,26 +234,35 @@ def _ticket_list(raw: object, play_size: int) -> tuple[tuple[int, ...], ...]:
     if not isinstance(raw, list):
         raise ValueError("tickets must be a two-dimensional array")
     tickets = []
-    for item in raw:
-        numbers = _flat_numbers(item, play_size)
-        if len(numbers) != play_size:
-            raise ValueError(f"ticket length must equal play_size={play_size}: {item}")
+    for index, item in enumerate(raw, start=1):
+        numbers = _flat_numbers(item, play_size, label=f"tickets[{index}]", exact_size=play_size)
         tickets.append(tuple(numbers))
     return tuple(tickets)
 
 
-def _flat_numbers(raw: object, limit: int) -> list[int]:
+def _flat_numbers(
+    raw: object,
+    limit: int,
+    *,
+    label: str,
+    exact_size: int | None = None,
+) -> list[int]:
     if not isinstance(raw, list):
         return []
     numbers = []
     for value in raw:
         if isinstance(value, list):
-            raise ValueError(f"number payload must be one-dimensional: {raw}")
+            raise ValueError(f"{label} must be one-dimensional: {raw}")
         number = int(value)
-        if 1 <= number <= 80 and number not in numbers:
-            numbers.append(number)
-        if len(numbers) >= limit:
-            break
+        if not 1 <= number <= 80:
+            raise ValueError(f"{label} contains out-of-range number: {raw}")
+        if number in numbers:
+            raise ValueError(f"{label} must not contain duplicate numbers: {raw}")
+        numbers.append(number)
+    if len(numbers) > limit:
+        raise ValueError(f"{label} exceeds the allowed unique-number limit {limit}: {raw}")
+    if exact_size is not None and len(numbers) != exact_size:
+        raise ValueError(f"{label} must contain exactly play_size={exact_size} unique numbers: {raw}")
     return numbers
 
 

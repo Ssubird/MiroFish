@@ -190,9 +190,9 @@ class PurchaseDiscussionService:
         return [
             f"Target Period: {request.context.target_draw.period}",
             f"Budget: {self.budget_yuan} yuan; unit ticket cost: {self.ticket_cost_yuan} yuan; max tickets: {self.max_tickets}",
-            f"Primary Prediction ({pick} numbers): {list(request.ensemble_numbers)}",
-            f"Alternate Numbers: {list(request.alternate_numbers)}",
-            "The purchase committee may expand the primary prediction into tickets / wheel / dan_tuo / portfolio.",
+            f"Reference Ticket ({pick} numbers): {list(request.ensemble_numbers)}",
+            f"Hedge Pool: {list(request.alternate_numbers)}",
+            "The purchase committee may expand the reference ticket into tickets / wheel / dan_tuo / portfolio.",
             f"Use the committee discussion to decide how to spend the {self.budget_yuan} yuan budget.",
             "You may mix multiple play sizes (1-10) and structures as long as total cost stays within budget.",
             "Backtest Performance:",
@@ -238,23 +238,26 @@ class PurchaseDiscussionService:
     def _plan_schema(self) -> str:
         return (
             'Return JSON only: {"plan_style":"...", "plan_type":"tickets|wheel|dan_tuo|portfolio", '
-            '"play_size":5, "play_size_review":{"<size>":"<reason>"}, '
+            '"play_size":<allowed size>, "play_size_review":{"<size>":"<reason>"}, '
             '"chosen_edge":"...", "trusted_strategy_ids":["..."], "tickets":[[...]], '
             '"wheel_numbers":[...], "banker_numbers":[...], "drag_numbers":[...], '
-            '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":5,"tickets":[[...]],'
+            '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":<allowed size>,"tickets":[[...]],'
             '"wheel_numbers":[...],"banker_numbers":[...],"drag_numbers":[...],"primary_ticket":[...],"comment":"...","rationale":"..."}], '
             '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], '
-            '"focus":["..."], "rationale":"..."}'
+            '"focus":["..."], "rationale":"..."} '
+            '(every portfolio leg is live and counted toward the same final budget; '
+            'do not place illustrative alternatives inside portfolio_legs)'
         )
 
     def _discussion_schema(self) -> str:
         return (
             'Return JSON only: {"comment":"...", "support_role_ids":["..."], "plan_style":"...", '
-            '"plan_type":"tickets|wheel|dan_tuo|portfolio", "play_size":5, '
+            '"plan_type":"tickets|wheel|dan_tuo|portfolio", "play_size":<allowed size>, '
             '"play_size_review":{"<size>":"<reason>"}, "chosen_edge":"...", '
             '"trusted_strategy_ids":["..."], "tickets":[[...]], "wheel_numbers":[...], '
-            '"banker_numbers":[...], "drag_numbers":[...], "portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":5}], '
-            '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], "focus":["..."], "rationale":"..."}'
+            '"banker_numbers":[...], "drag_numbers":[...], "portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":<allowed size>}], '
+            '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], "avoid_numbers":[...], "focus":["..."], "rationale":"..."} '
+            '(portfolio_legs must contain executable legs only; alternatives belong in comment)'
         )
 
     def _discussion_note(self, proposal: dict[str, object], round_index: int) -> dict[str, object]:

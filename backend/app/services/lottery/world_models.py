@@ -62,19 +62,24 @@ class WorldSession:
     world_goal: str
     current_phase: str = "idle"
     current_period: str | None = None
+    visible_through_period: str | None = None
     active_agent_ids: tuple[str, ...] = ()
     shared_memory: Mapping[str, str] = field(default_factory=dict)
+    agent_block_schema_version: int = 0
     agents: tuple[WorldAgentRef, ...] = ()
     agent_state: Mapping[str, Any] = field(default_factory=dict)
     request_metrics: Mapping[str, Any] = field(default_factory=dict)
     progress: Mapping[str, Any] = field(default_factory=dict)
     round_history: tuple[Mapping[str, Any], ...] = ()
     settlement_history: tuple[Mapping[str, Any], ...] = ()
+    issue_ledger: tuple[Mapping[str, Any], ...] = ()
     current_round: Mapping[str, Any] = field(default_factory=dict)
     latest_prediction: Mapping[str, Any] = field(default_factory=dict)
     latest_purchase_plan: Mapping[str, Any] = field(default_factory=dict)
+    latest_review: Mapping[str, Any] = field(default_factory=dict)
     latest_issue_summary: Mapping[str, Any] = field(default_factory=dict)
     asset_manifest: tuple[Mapping[str, Any], ...] = ()
+    execution_log: tuple[Mapping[str, Any], ...] = ()
     failed_phase: str | None = None
     last_success_phase: str | None = None
     error: Mapping[str, Any] | None = None

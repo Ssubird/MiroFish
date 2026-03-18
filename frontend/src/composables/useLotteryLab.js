@@ -8,7 +8,9 @@ import { runtimeLabel } from '../utils/lotteryDisplay'
 
 const FIXED_WORLD_WARMUP = 3
 const DEFAULT_GRAPH_MODE = 'local'
-const DEFAULT_RUNTIME_MODE = 'world_v1'
+const DEFAULT_RUNTIME_MODE = 'world_v2_market'
+const LEGACY_RUNTIME_MODE = 'legacy'
+const ACTIVE_WORLD_STATUSES = new Set(['queued', 'running'])
 const WORLD_GRAPH_LABEL = '内置世界上下文'
 
 
@@ -17,6 +19,8 @@ const worldRunningMessage = (longRun) => (
     ? '持续世界正在推进：会先检查上一期是否可结算，再进入当前目标期的讨论、裁判和购买委员会。'
     : '持续世界正在推进当前目标期。'
 )
+
+const isPersistentWorldMode = (mode) => mode !== LEGACY_RUNTIME_MODE
 
 
 export const useLotteryLab = () => {
@@ -67,7 +71,7 @@ export const useLotteryLab = () => {
     graphMode.value === 'zep' ? setup.zepGraphStatus.value?.graph_id || undefined : undefined
   ))
   const graphReady = computed(() => {
-    if (runtimeMode.value === 'world_v1') return true
+    if (isPersistentWorldMode(runtimeMode.value)) return true
     if (graphMode.value === 'zep') return Boolean(setup.zepGraphStatus.value?.available)
     if (graphMode.value === 'kuzu') return Boolean(setup.kuzuGraphStatus.value?.available)
     return true
@@ -78,7 +82,7 @@ export const useLotteryLab = () => {
     ).length
   ))
   const estimatedLLMCalls = computed(() => {
-    if (runtimeMode.value === 'world_v1') {
+    if (isPersistentWorldMode(runtimeMode.value)) {
       const llmStrategies = selectedLLMCount.value
       const specialistCalls = 1
       const judgeCalls = 1
@@ -111,7 +115,7 @@ export const useLotteryLab = () => {
     local: { available: true, graph_id: 'memory-only' }
   }))
   const graphLabel = computed(() => {
-    if (runtimeMode.value === 'world_v1') return WORLD_GRAPH_LABEL
+    if (isPersistentWorldMode(runtimeMode.value)) return WORLD_GRAPH_LABEL
     if (graphMode.value === 'zep') return `Zep / ${requestZepGraphId.value || '未同步'}`
     if (graphMode.value === 'kuzu') return `Kuzu / ${setup.kuzuGraphStatus.value?.graph_id || '未同步'}`
     return 'Local'
@@ -129,7 +133,7 @@ export const useLotteryLab = () => {
   const updateRunStatus = (state, startedAt, message, response = null) => {
     const finishedAt = state === 'running' ? null : Date.now()
     const runtime = response?.data?.evaluation?.runtime_mode || runtimeMode.value
-    const summary = runtime === 'world_v1'
+    const summary = isPersistentWorldMode(runtime)
       ? `${runtimeLabel(runtime)} / 持续世界 / 同阶段并发 x${llmParallelism.value}`
       : [
           runtimeLabel(runtime),
@@ -166,13 +170,19 @@ export const useLotteryLab = () => {
       middle ? `中间结论 ${middle}` : ''
     ].filter(Boolean).join(' / ')
     if (result) backtest.value = result
+    if (ACTIVE_WORLD_STATUSES.has(session.status)) {
+      error.value = ''
+    updateRunStatus('running', startedAt, `涓栫晫鎺ㄨ繘涓細${detail}`)
+      updateRunStatus('running', startedAt, `世界推进中：${detail}`)
+      return
+    }
     if (session.status === 'await_result' || session.status === 'idle') {
       updateRunStatus('success', startedAt, `世界状态已更新：${detail}`, { data: result || {} })
       runningBacktest.value = false
       return
     }
     if (session.status === 'failed') {
-      error.value = session.error?.message || 'world_v1 执行失败'
+      error.value = session.error?.message || '持续世界执行失败'
       updateRunStatus('error', startedAt, session.error?.message || `世界推进失败：${detail}`, { data: result || {} })
       runningBacktest.value = false
       return
@@ -181,7 +191,7 @@ export const useLotteryLab = () => {
   }
 
   const buildRequestPayload = () => {
-    const worldMode = runtimeMode.value === 'world_v1'
+    const worldMode = isPersistentWorldMode(runtimeMode.value)
     return {
       evaluation_size: evaluationSize.value,
       pick_size: pickSize.value,
@@ -213,7 +223,7 @@ export const useLotteryLab = () => {
       error.value = '至少选择一个 agent 后再运行。'
       return
     }
-    if (runtimeMode.value !== 'world_v1' && !graphReady.value) {
+    if (!isPersistentWorldMode(runtimeMode.value) && !graphReady.value) {
       error.value = graphMode.value === 'kuzu' ? '当前 Kuzu 图谱尚未同步。' : '当前 Zep 图谱暂不可用。'
       return
     }
@@ -224,13 +234,13 @@ export const useLotteryLab = () => {
     updateRunStatus(
       'running',
       startedAt,
-      runtimeMode.value === 'world_v1'
+      isPersistentWorldMode(runtimeMode.value)
         ? worldRunningMessage(isLongRun.value)
         : '后端正在执行经典回测。'
     )
     try {
       const payload = buildRequestPayload()
-      if (runtimeMode.value === 'world_v1') {
+      if (isPersistentWorldMode(runtimeMode.value)) {
         const response = await advanceLotteryWorld(payload)
         const sessionId = response.data.world_session?.session_id || ''
         const snapshot = await world.loadWorld(sessionId)
@@ -256,7 +266,7 @@ export const useLotteryLab = () => {
     const snapshot = worldSessionId.value
       ? await world.loadWorld(worldSessionId.value)
       : await world.loadCurrentWorld()
-    if (snapshot?.session?.session?.status === 'running') {
+    if (ACTIVE_WORLD_STATUSES.has(snapshot?.session?.session?.status)) {
       const startedAt = new Date(snapshot.session.session.created_at || Date.now()).getTime()
       runningBacktest.value = true
       updateWorldRunStatus(startedAt, snapshot)
@@ -285,7 +295,7 @@ export const useLotteryLab = () => {
   })
 
   watch(runtimeMode, (mode) => {
-    if (mode !== 'world_v1') return
+    if (!isPersistentWorldMode(mode)) return
     warmupSize.value = FIXED_WORLD_WARMUP
     pickSize.value = 5
     issueParallelism.value = 1

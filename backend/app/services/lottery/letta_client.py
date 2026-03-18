@@ -109,6 +109,65 @@ class LettaClient:
             {"text": text},
         )
 
+    def list_tools_for_agent(self, agent_id: str) -> list[dict[str, Any]]:
+        body = self._request_json("GET", f"/agents/{agent_id}/tools")
+        if isinstance(body, list):
+            return [item for item in body if isinstance(item, dict)]
+        if isinstance(body, dict):
+            items = body.get("items", [])
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        return []
+
+    def attach_tool_to_agent(self, agent_id: str, tool_id: str) -> dict[str, Any]:
+        return self._request_object("PATCH", f"/agents/{agent_id}/tools/attach/{tool_id}")
+
+    def list_mcp_servers(self) -> list[dict[str, Any]]:
+        body = self._request_json("GET", "/tools/mcp/servers")
+        if isinstance(body, list):
+            return [item for item in body if isinstance(item, dict)]
+        if isinstance(body, dict):
+            items = body.get("items", body.get("servers", []))
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        return []
+
+    def add_mcp_server(self, config: dict[str, Any]) -> dict[str, Any]:
+        return self._request_object("PUT", "/tools/mcp/servers", config)
+
+    def connect_mcp_server(self, config: dict[str, Any]) -> dict[str, Any]:
+        return self._request_object("POST", "/tools/mcp/servers/connect", config)
+
+    def resync_mcp_server_tools(
+        self,
+        server_name: str,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        suffix = f"?agent_id={agent_id}" if agent_id else ""
+        return self._request_object("POST", f"/tools/mcp/servers/{server_name}/resync{suffix}")
+
+    def list_mcp_tools_by_server(self, server_name: str) -> list[dict[str, Any]]:
+        body = self._request_json("GET", f"/tools/mcp/servers/{server_name}/tools")
+        if isinstance(body, list):
+            return [item for item in body if isinstance(item, dict)]
+        if isinstance(body, dict):
+            items = body.get("items", body.get("tools", []))
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        return []
+
+    def execute_mcp_tool(
+        self,
+        server_name: str,
+        tool_name: str,
+        args: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._request_object(
+            "POST",
+            f"/tools/mcp/servers/{server_name}/tools/{tool_name}/execute",
+            {"args": args or {}},
+        )
+
     def send_message(self, agent_id: str, content: str) -> str:
         body = self._request_object(
             "POST",

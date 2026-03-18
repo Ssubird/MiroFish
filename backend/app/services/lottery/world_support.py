@@ -14,10 +14,17 @@ from .models import PredictionContext, StrategyPrediction
 
 WORLD_GOAL = "Keep a persistent prediction world, let agents debate, and maximize Happy 8 hit rate plus bankroll efficiency."
 MANUAL_REPORT_DIGEST = (
-    "prediction_report.md is manual-reference-only. It never enters runtime, grounding, agents, or the purchase committee."
+    "prediction_report.md and other reports may be summarized into world memory, evidence lookup, and postmortem. "
+    "Treat them as historical evidence only; never use them to leak future results."
 )
 NO_SETTLED_OUTCOME = "No settled world rounds yet."
 NO_RULE_DIGEST = "No deterministic rule digest yet."
+NO_VISIBLE_HISTORY_DIGEST = "No visible draw history digest yet."
+NO_MARKET_BOARD = "No market board yet."
+NO_SOCIAL_FEED = "No social feed yet."
+NO_PURCHASE_BOARD = "No purchase board yet."
+NO_HANDBOOK_PRINCIPLES = "No handbook principles loaded."
+NO_FINAL_DECISION_CONSTRAINTS = "No final decision constraints yet."
 ISSUE_BRIEF_LIMIT = 2200
 DIGEST_LIMIT = 900
 PROMPT_PASSAGE_LIMIT = 1200
@@ -26,7 +33,7 @@ PURCHASE_ROLES = (
     (
         "budget_guard",
         "LLM-Budget-Guard",
-        "Protect the bankroll. Compare play sizes 3/4/5/6 first and reject lazy all-in pick-5 singles.",
+        "Protect the bankroll. Compare all available play sizes first and reject lazy all-in single-ticket plans.",
     ),
     (
         "coverage_builder",
@@ -42,14 +49,7 @@ PURCHASE_ROLES = (
 
 
 def initial_shared_memory(budget_yuan: int) -> dict[str, str]:
-    return {
-        "world_goal": WORLD_GOAL,
-        "current_issue": "",
-        "recent_outcomes": NO_SETTLED_OUTCOME,
-        "report_digest": MANUAL_REPORT_DIGEST,
-        "rule_digest": NO_RULE_DIGEST,
-        "purchase_budget": f"Current purchase budget: {budget_yuan} yuan.",
-    }
+    return _shared_block_defaults(f"Current purchase budget: {budget_yuan} yuan.")
 
 
 def agent_blocks(display_name: str, description: str, bankroll_view: str = "") -> dict[str, str]:
@@ -57,11 +57,7 @@ def agent_blocks(display_name: str, description: str, bankroll_view: str = "") -
         "persona": f"{display_name}: {description}",
         "strategy_style": description,
         "bankroll_view": bankroll_view or "Balance hit rate, payout, and budget discipline.",
-        "world_goal": WORLD_GOAL,
-        "current_issue": "",
-        "recent_outcomes": NO_SETTLED_OUTCOME,
-        "purchase_budget": "",
-    }
+    } | _shared_block_defaults("")
 
 
 def prediction_prompt(
@@ -139,8 +135,8 @@ def prompt_passages(context: PredictionContext) -> list[str]:
 
 
 def report_passages(context: PredictionContext) -> list[str]:
-    del context
-    return []
+    report_docs = [item for item in context.knowledge_documents if item.kind == "report"]
+    return _document_passages(report_docs, 1, PROMPT_PASSAGE_LIMIT)
 
 
 def rule_digest(
@@ -195,15 +191,19 @@ def purchase_schema() -> str:
     sizes = ",".join(str(item) for item in ALLOWED_PLAY_SIZES)
     return (
         'Return JSON only: {"plan_style":"...", "plan_type":"tickets|wheel|dan_tuo|portfolio", '
-        '"play_size":5, "play_size_review":{...}, '
+        '"play_size":<allowed size>, "play_size_review":{...}, '
         '"chosen_edge":"...", "trusted_strategy_ids":["..."], "tickets":[[...]], '
         '"wheel_numbers":[...], "banker_numbers":[...], "drag_numbers":[...], '
-        '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":5,"tickets":[[...]],'
+        '"portfolio_legs":[{"plan_type":"tickets|wheel|dan_tuo","play_size":<allowed size>,"tickets":[[...]],'
         '"wheel_numbers":[...],"banker_numbers":[...],"drag_numbers":[...],"primary_ticket":[...],"comment":"...","rationale":"..."}], '
         '"primary_ticket":[...], "core_numbers":[...], "hedge_numbers":[...], '
         '"candidate_numbers":[...], "avoid_numbers":[...], "support_role_ids":["..."], '
         '"comment":"...", "rationale":"..."} '
-        f"(play_size must be one of {sizes})"
+        f"(play_size must be one of {sizes}; every ticket and number list must use unique numbers only; "
+        'tickets and primary_ticket must contain exactly play_size unique numbers; '
+        'every portfolio_legs item is live and counts toward the final budget; '
+        'do not put illustrative or reference-only alternatives into portfolio_legs; '
+        'the expanded ticket count must stay within budget)'
     )
 
 
@@ -217,7 +217,11 @@ def purchase_rule_block() -> str:
             *play_rule_lines(),
             "Allowed structures: tickets, wheel, dan_tuo, portfolio.",
             "Portfolio may mix multiple structures and play sizes as long as total cost stays within budget.",
+            "Every portfolio leg is executable and counted toward the same global budget and ticket cap.",
+            "Do not place illustrative, backup, or reference-only legs inside portfolio_legs.",
+            "Put alternative ideas in comment or rationale instead of portfolio_legs.",
             "Compare all available play sizes before choosing.",
+            "Do not repeat numbers inside the same ticket, wheel pool, banker set, or drag set.",
         ]
     )
 
@@ -233,6 +237,23 @@ def _focus_numbers(predictions: dict[str, StrategyPrediction]) -> str:
         counter.update(int(value) for value in prediction.numbers)
     pairs = sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:10]
     return ", ".join(f"{number}x{count}" for number, count in pairs)
+
+
+def _shared_block_defaults(purchase_budget: str) -> dict[str, str]:
+    return {
+        "world_goal": WORLD_GOAL,
+        "current_issue": "",
+        "visible_draw_history_digest": NO_VISIBLE_HISTORY_DIGEST,
+        "market_board": NO_MARKET_BOARD,
+        "social_feed": NO_SOCIAL_FEED,
+        "purchase_board": NO_PURCHASE_BOARD,
+        "handbook_principles": NO_HANDBOOK_PRINCIPLES,
+        "final_decision_constraints": NO_FINAL_DECISION_CONSTRAINTS,
+        "recent_outcomes": NO_SETTLED_OUTCOME,
+        "report_digest": MANUAL_REPORT_DIGEST,
+        "rule_digest": NO_RULE_DIGEST,
+        "purchase_budget": purchase_budget,
+    }
 
 
 def _json_object_prefix(text: str) -> str | None:

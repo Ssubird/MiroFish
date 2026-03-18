@@ -71,6 +71,15 @@ data/
 /ziweidoushu/.letta_runtime_debug/
 /ziweidoushu/.letta_runtime_debug2/
 /ziweidoushu/.letta_runtime_test/
+/ziweidoushu/.kuzu_graph.runtime_projection.json
 /ziweidoushu/.kuzu_graph
 /ziweidoushu/.kuzu_graph_state.json
-/ziweidoushu/*.md
+/backend/tmp/
+
+!/ziweidoushu/AGENT_ARCHITECTURE.md
+!/ziweidoushu/PROMPT_BOUND_MARKET_ROLES.md
+!/ziweidoushu/README.md
+!/ziweidoushu/USAGE.md
+!/ziweidoushu/WORLD_V2_DESIGN.md
+!/ziweidoushu/WORLD_V2_RUNTIME_GUIDE.md
+!/ziweidoushu/WORLD_V2_TROUBLESHOOTING.md

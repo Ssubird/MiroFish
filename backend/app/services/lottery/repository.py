@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 import re
@@ -88,6 +89,8 @@ class LotteryDataRepository:
 
     def _report_metadata_from_json(self, json_path: Path) -> dict[str, object]:
         payload = json.loads(json_path.read_text(encoding="utf-8"))
+        if isinstance(payload, list):
+            return self._report_metadata_from_ledger(payload, json_path)
         dataset = payload.get("dataset") or {}
         artifacts = payload.get("report_artifacts") or {}
         return {
@@ -95,6 +98,25 @@ class LotteryDataRepository:
             "effective_period": str(dataset.get("latest_completed_period", "")).strip(),
             "max_visible_period": str(dataset.get("pending_target_period", "")).strip(),
             "scope_source": "json_artifact",
+        }
+
+    def _report_metadata_from_ledger(
+        self,
+        payload: list[object],
+        json_path: Path,
+    ) -> dict[str, object]:
+        latest = next(
+            (item for item in reversed(payload) if isinstance(item, dict)),
+            {},
+        )
+        created_at = ""
+        if json_path.exists():
+            created_at = datetime.fromtimestamp(json_path.stat().st_mtime, UTC).isoformat()
+        return {
+            "created_at": str(created_at),
+            "effective_period": str(latest.get("predicted_period", "")).strip(),
+            "max_visible_period": str(latest.get("visible_through_period", "")).strip(),
+            "scope_source": "json_issue_ledger",
         }
 
     def _report_metadata_from_markdown(self, content: str) -> dict[str, object]:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ...config import Config
+from dataclasses import replace
+import os
+
+from ...config import Config, reload_project_env
 from .backtest_policy import (
     judge_strategies,
     primary_strategies,
@@ -35,7 +38,7 @@ from .paths import DRAW_DATA_FILE, LOTTERY_ROOT
 from .report_writer import LotteryReportWriter
 from .repository import LotteryDataRepository
 from .research_runtime import LotteryResearchRuntime
-from .research_types import LLMRunOptions
+from .research_types import LLMRunOptions, WorkspaceAssets
 from .serializers import (
     serialize_chart,
     serialize_document,
@@ -48,10 +51,15 @@ from .serializers import (
 )
 from .deliberation import DialogueCoordinator
 from .document_filters import grounding_documents, prompt_documents
+from .letta_no_mcp_client import LettaNoMcpClient
+from .local_world_client import LocalWorldClient
 from .world_runtime import LotteryWorldRuntime
+from .world_runtime_readiness import ensure_runtime_ready, runtime_readiness
+from .world_runtime_flags import allow_world_v2_without_mcp
 from .world_v2_runtime import LotteryWorldV2Runtime
 from .zep_graph import ZepGraphService
 from .catalog import build_llm_status, build_strategy_group_summary
+from .catalog import build_market_v2_catalog
 
 
 class LotteryResearchService:
@@ -79,9 +87,13 @@ class LotteryResearchService:
             runtime.graph_service,
             kuzu_graph_service=runtime.kuzu_graph_service,
         )
+        world_v2_client = getattr(self.world_runtime, "letta_client", None)
+        if world_v2_client is None:
+            world_v2_client = _no_mcp_world_v2_client()
         self.world_v2_runtime = LotteryWorldV2Runtime(
             runtime.graph_service,
             store=self.world_runtime.store,
+            letta_client=world_v2_client,
             kuzu_graph_service=runtime.kuzu_graph_service,
         )
         self.kuzu_graph_service = runtime.kuzu_graph_service
@@ -92,6 +104,12 @@ class LotteryResearchService:
         if runtime_mode == WORLD_V2_MARKET_RUNTIME_MODE:
             return self.world_v2_runtime
         return self.world_runtime
+
+    def _current_runtime(self):
+        session_id = self.world_runtime.store.current_session_id()
+        if not session_id:
+            return self.world_v2_runtime
+        return self._runtime_for_session(session_id)
 
     def _runtime_for_session(self, session_id: str):
         session = self.world_runtime.store.load_session(session_id)
@@ -211,7 +229,9 @@ class LotteryResearchService:
         return payload
 
     def start_world_session(self, **kwargs) -> dict[str, object]:
-        return self.advance_world_session(**{**kwargs, "runtime_mode": WORLD_V1_RUNTIME_MODE})
+        runtime_mode = str(kwargs.get("runtime_mode") or WORLD_V2_MARKET_RUNTIME_MODE).strip()
+        self.ensure_world_runtime_ready(runtime_mode)
+        return self.advance_world_session(**{**kwargs, "runtime_mode": runtime_mode})
 
     def advance_world_session(
         self,
@@ -228,15 +248,17 @@ class LotteryResearchService:
         agent_dialogue_rounds: int = DEFAULT_AGENT_DIALOGUE_ROUNDS,
         graph_mode: str = LOCAL_GRAPH_MODE,
         zep_graph_id: str | None = None,
-        runtime_mode: str = WORLD_V1_RUNTIME_MODE,
+        runtime_mode: str = WORLD_V2_MARKET_RUNTIME_MODE,
         warmup_size: int = WORLD_WARMUP_ISSUES,
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
         assets: WorkspaceAssets | None = None,
-        target_period: str | None = None,
+        visible_through_period: str | None = None,
     ) -> dict[str, object]:
         del evaluation_size
+        self.ensure_world_runtime_ready(runtime_mode)
+        visible_through_period = _optional_string(visible_through_period)
         options = self._build_options(
             DEFAULT_EVALUATION_SIZE,
             pick_size,
@@ -257,73 +279,18 @@ class LotteryResearchService:
             session_id,
         )
         if assets is None:
-            assets = self.runtime.load_workspace()
-            if target_period:
-                from dataclasses import replace
-                target_idx = -1
-                for i, d in enumerate(assets.completed_draws):
-                    if d.period == target_period:
-                        target_idx = i
-                        break
-                if target_idx != -1:
-                    mock_completed = assets.completed_draws[:target_idx]
-                    mock_pending = [replace(assets.completed_draws[target_idx], numbers=())]
-                    assets = replace(
-                        assets,
-                        completed_draws=mock_completed,
-                        pending_draws=tuple(mock_pending)
-                    )
-                else:
-                    raise ValueError(f"Target period {target_period} not found in historical completed draws.")
+            assets = self._assets_for_visible_through_period(
+                self.runtime.load_workspace(),
+                visible_through_period,
+            )
 
-        selected = select_strategies(assets.strategies, strategy_ids)
+        selected = self._selected_world_strategies(assets, strategy_ids, runtime_mode)
         rt = self._runtime_for_mode(runtime_mode)
         payload = rt.advance(assets, selected, pick_size, options)
         payload["report_artifacts"] = self.report_writer.write(payload)
         rt.store.save_result(payload["world_session"]["session_id"], payload)
         rt.attach_report_artifacts(payload["world_session"]["session_id"], payload["report_artifacts"])
         return payload
-
-    def run_world_evolution(
-        self,
-        iterations: int = 3,
-        **kwargs
-    ) -> dict[str, object]:
-        from dataclasses import replace
-        assets = self.runtime.load_workspace()
-        
-        if len(assets.completed_draws) < iterations:
-            raise ValueError(f"Not enough completed draws for {iterations} iterations.")
-            
-        kwargs["runtime_mode"] = WORLD_V2_MARKET_RUNTIME_MODE
-        
-        results = []
-        for step in range(iterations, 0, -1):
-            mock_completed = assets.completed_draws[:-step]
-            mock_pending = list(assets.completed_draws[-step:])
-            
-            masked_pending = []
-            for d in mock_pending:
-                masked = replace(d, numbers=())
-                masked_pending.append(masked)
-                
-            mock_assets = replace(
-                assets,
-                completed_draws=mock_completed,
-                pending_draws=tuple(masked_pending)
-            )
-            
-            if results:
-                kwargs["session_id"] = results[-1]["world_session"]["session_id"]
-                
-            payload = self.advance_world_session(assets=mock_assets, **kwargs)
-            results.append(payload)
-            
-        return {
-            "evolution_steps": iterations,
-            "results": results,
-            "final_state": results[-1] if results else None
-        }
 
     def prepare_world_session(
         self,
@@ -340,15 +307,17 @@ class LotteryResearchService:
         agent_dialogue_rounds: int = DEFAULT_AGENT_DIALOGUE_ROUNDS,
         graph_mode: str = LOCAL_GRAPH_MODE,
         zep_graph_id: str | None = None,
-        runtime_mode: str = WORLD_V1_RUNTIME_MODE,
+        runtime_mode: str = WORLD_V2_MARKET_RUNTIME_MODE,
         warmup_size: int = WORLD_WARMUP_ISSUES,
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
-        target_period: str | None = None,
+        visible_through_period: str | None = None,
     ) -> dict[str, object]:
         if runtime_mode not in (WORLD_V1_RUNTIME_MODE, WORLD_V2_MARKET_RUNTIME_MODE):
             raise ValueError(f"prepare_world_session unsupported mode: {runtime_mode}")
+        self.ensure_world_runtime_ready(runtime_mode)
+        visible_through_period = _optional_string(visible_through_period)
         options = self._build_options(
             evaluation_size,
             pick_size,
@@ -368,8 +337,11 @@ class LotteryResearchService:
             budget_yuan,
             session_id,
         )
-        assets = self.runtime.load_workspace()
-        selected = select_strategies(assets.strategies, strategy_ids)
+        assets = self._assets_for_visible_through_period(
+            self.runtime.load_workspace(),
+            visible_through_period,
+        )
+        selected = self._selected_world_strategies(assets, strategy_ids, runtime_mode)
         rt = self._runtime_for_mode(runtime_mode)
         session = rt.prepare_session(assets, selected, pick_size, options.model_name, options.session_id)
         return {
@@ -402,7 +374,7 @@ class LotteryResearchService:
         return self._runtime_for_session(session_id).get_session(session_id)
 
     def get_current_world_session(self) -> dict[str, object]:
-        return self.world_runtime.get_current_session()
+        return self._current_runtime().get_current_session()
 
     def reset_current_world_session(self) -> dict[str, object]:
         self.world_runtime.store.reset_current_session()
@@ -415,10 +387,10 @@ class LotteryResearchService:
         limit: int = 50,
         latest: bool = False,
     ) -> dict[str, object]:
-        return self.world_runtime.get_timeline(session_id, offset, limit, latest)
+        return self._runtime_for_session(session_id).get_timeline(session_id, offset, limit, latest)
 
     def interview_world_agent(self, session_id: str, agent_id: str, prompt: str) -> dict[str, object]:
-        return self.world_runtime.interview_agent(session_id, agent_id, prompt, self.runtime.load_workspace())
+        return self._runtime_for_session(session_id).interview_agent(session_id, agent_id, prompt, self.runtime.load_workspace())
 
     def get_world_result(self, session_id: str) -> dict[str, object]:
         return self._runtime_for_session(session_id).get_result(session_id)
@@ -429,16 +401,92 @@ class LotteryResearchService:
     def get_recent_draw_stats(self, session_id: str | None = None) -> dict[str, object]:
         if session_id is None:
             session_id = self.world_runtime.store.current_session_id()
-        return self.world_runtime.get_recent_draw_stats(self.runtime.load_workspace(), session_id)
+        if session_id is None:
+            return self._current_runtime().get_recent_draw_stats(self.runtime.load_workspace(), None)
+        return self._runtime_for_session(session_id).get_recent_draw_stats(self.runtime.load_workspace(), session_id)
 
     def finalize_world_result(self, session_id: str) -> dict[str, object]:
         payload = self.get_world_result(session_id)
         if payload.get("report_artifacts"):
             return payload
         payload["report_artifacts"] = self.report_writer.write(payload)
-        self.world_runtime.attach_report_artifacts(session_id, payload["report_artifacts"])
-        self.world_runtime.store.save_result(session_id, payload)
+        rt = self._runtime_for_session(session_id)
+        rt.attach_report_artifacts(session_id, payload["report_artifacts"])
+        rt.store.save_result(session_id, payload)
         return payload
+
+    def get_world_runtime_readiness(
+        self,
+        runtime_mode: str = WORLD_V2_MARKET_RUNTIME_MODE,
+    ) -> dict[str, object]:
+        return runtime_readiness(runtime_mode, getattr(self._runtime_for_mode(runtime_mode), "letta_client", None))
+
+    def ensure_world_runtime_ready(self, runtime_mode: str) -> None:
+        ensure_runtime_ready(runtime_mode, getattr(self._runtime_for_mode(runtime_mode), "letta_client", None))
+
+    def queue_world_session(self, session_id: str) -> dict[str, object]:
+        rt = self._runtime_for_session(session_id)
+        return rt.queue_session(session_id)
+
+    def record_world_session_failure(
+        self,
+        session_id: str,
+        exc: Exception,
+        runtime_mode: str | None = None,
+    ) -> dict[str, object]:
+        if self.world_runtime.store.session_exists(session_id):
+            rt = self._runtime_for_session(session_id)
+        else:
+            mode = runtime_mode or WORLD_V2_MARKET_RUNTIME_MODE
+            rt = self._runtime_for_mode(mode)
+        return rt.fail_session(session_id, exc)
+
+    def _selected_world_strategies(
+        self,
+        assets,
+        strategy_ids: list[str] | None,
+        runtime_mode: str,
+    ) -> dict[str, object]:
+        selected = select_strategies(assets.strategies, strategy_ids)
+        if runtime_mode != WORLD_V2_MARKET_RUNTIME_MODE:
+            return selected
+        market_catalog = build_market_v2_catalog(chart_count=len(assets.chart_profiles))
+        return {
+            strategy_id: market_catalog.get(strategy_id, strategy)
+            for strategy_id, strategy in selected.items()
+        }
+
+    def _assets_for_visible_through_period(
+        self,
+        assets: WorkspaceAssets,
+        visible_through_period: str | None,
+    ) -> WorkspaceAssets:
+        visible_through_period = _optional_string(visible_through_period)
+        if not visible_through_period:
+            return assets
+        for index, draw in enumerate(assets.completed_draws):
+            if draw.period != visible_through_period:
+                continue
+            next_pending = self._next_visible_pending_draw(assets, index + 1)
+            if next_pending is None:
+                raise ValueError(f"Visible-through period {visible_through_period} has no next issue to predict.")
+            return replace(
+                assets,
+                completed_draws=assets.completed_draws[: index + 1],
+                pending_draws=(next_pending,),
+            )
+        raise ValueError(f"Visible-through period {visible_through_period} not found in workspace draws.")
+
+    def _next_visible_pending_draw(
+        self,
+        assets: WorkspaceAssets,
+        next_index: int,
+    ):
+        if next_index < len(assets.completed_draws):
+            return replace(assets.completed_draws[next_index], numbers=())
+        if assets.pending_draws:
+            return replace(assets.pending_draws[0], numbers=())
+        return None
 
     def _build_options(
         self,
@@ -491,3 +539,19 @@ class LotteryResearchService:
             budget_yuan,
             session_id,
         )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _no_mcp_world_v2_client():
+    if not allow_world_v2_without_mcp():
+        return None
+    reload_project_env()
+    if str(os.environ.get("LETTA_BASE_URL", "")).strip():
+        return LettaNoMcpClient()
+    return LocalWorldClient()

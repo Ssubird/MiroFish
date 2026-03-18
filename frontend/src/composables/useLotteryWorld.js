@@ -108,6 +108,19 @@ export const useLotteryWorld = (setError) => {
 
   const refreshWorld = async (sessionId) => loadWorld(sessionId)
 
+  const loadRecentDrawStatsOnly = async (sessionId = '') => {
+    worldLoading.value = true
+    try {
+      recentDrawStats.value = (await getLotteryRecentDrawStats(sessionId || undefined)).data
+      return recentDrawStats.value
+    } catch (err) {
+      setError(err.message || '读取最近号码板失败')
+      return null
+    } finally {
+      worldLoading.value = false
+    }
+  }
+
   const resetWorld = async () => {
     worldLoading.value = true
     try {
@@ -199,6 +212,7 @@ export const useLotteryWorld = (setError) => {
     worldSharedMemory,
     loadWorld,
     loadCurrentWorld,
+    loadRecentDrawStatsOnly,
     refreshWorld,
     resetWorld,
     startPolling,

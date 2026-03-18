@@ -5,7 +5,8 @@
         <p class="eyebrow">ZIWEI HAPPY 8</p>
         <h1>持续状态世界模拟器</h1>
         <p class="page-copy">
-          以 `keno8_predict_data.json` 为唯一数据源，围绕最后一条空号码期持续讨论、收敛、购买、等待开奖、结算复盘。
+          以 `keno8_predict_data.json` 为唯一开奖数据源，按你选择的可见截止期推进一轮，
+          先预测下一期，再在下一次点击时完成复盘并继续预测。
         </p>
       </div>
       <button type="button" class="home-btn" @click="router.push('/')">返回首页</button>
@@ -21,27 +22,29 @@
           :budget-yuan="budgetYuan"
           :llm-parallelism="llmParallelism"
           :agent-dialogue-rounds="agentDialogueRounds"
-          :evolution-iterations="evolutionIterations"
-          :target-period="targetPeriod"
+          :visible-through-period="visibleThroughPeriod"
           :history-periods="historyPeriods"
           :live-interview-enabled="liveInterviewEnabled"
           :llm-models="llmModels"
           :selected-model-name="selectedModelName"
           :model-probe-result="modelProbeResult"
+          :model-list-status="modelListStatus"
           :llm-model-loading="llmModelLoading"
+          :runtime-readiness="runtimeReadiness"
+          :runtime-readiness-loading="runtimeReadinessLoading"
           :run-message="runMessage"
           :busy="busy"
+          :running="running"
           :can-advance="canAdvance"
           @advance="advanceWorld"
-          @evolution="evolutionWorld"
+          @load-models="loadModels"
           @probe-model="probeSelectedModel(selectedModelName)"
           @select-all="selectedStrategyIds = availableStrategies.map((item) => item.strategy_id)"
           @toggle-strategy="toggleStrategy"
           @update:budgetYuan="budgetYuan = $event"
           @update:llmParallelism="llmParallelism = $event"
           @update:agentDialogueRounds="agentDialogueRounds = $event"
-          @update:evolutionIterations="evolutionIterations = $event"
-          @update:targetPeriod="targetPeriod = $event"
+          @update:visibleThroughPeriod="visibleThroughPeriod = $event"
           @update:liveInterviewEnabled="liveInterviewEnabled = $event"
           @update:selectedModelName="selectedModelName = $event"
         />
@@ -100,12 +103,12 @@ const router = useRouter()
 const {
   error,
   busy,
+  running,
   runMessage,
   budgetYuan,
   llmParallelism,
   agentDialogueRounds,
-  evolutionIterations,
-  targetPeriod,
+  visibleThroughPeriod,
   historyPeriods,
   liveInterviewEnabled,
   selectedStrategyIds,
@@ -115,7 +118,11 @@ const {
   llmModels,
   selectedModelName,
   modelProbeResult,
+  modelListStatus,
   llmModelLoading,
+  runtimeReadiness,
+  runtimeReadinessLoading,
+  loadModels,
   activeModelName,
   session,
   worldTimeline,
@@ -131,7 +138,6 @@ const {
   worldInterviewBusy,
   canAdvance,
   advanceWorld,
-  evolutionWorld,
   resetWorld,
   refreshWorld,
   submitInterview,

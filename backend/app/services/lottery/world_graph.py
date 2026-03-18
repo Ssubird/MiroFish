@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from typing import Any
 
 
-PHASE_ORDER = (
+V1_PHASE_ORDER = (
     "opening",
     "public_debate",
     "judge_synthesis",
@@ -14,11 +13,25 @@ PHASE_ORDER = (
     "settlement",
     "postmortem",
 )
+V2_PHASE_ORDER = (
+    "generator_opening",
+    "social_propagation",
+    "market_rerank",
+    "plan_synthesis",
+    "handbook_final_decision",
+    "settlement",
+    "postmortem",
+)
 PHASE_LABELS = {
     "opening": "Opening",
+    "generator_opening": "Generator Opening",
     "public_debate": "Debate",
-    "judge_synthesis": "Synthesis",
-    "purchase_committee": "Purchase",
+    "social_propagation": "Social Propagation",
+    "judge_synthesis": "Judge Synthesis",
+    "market_rerank": "Market Rerank",
+    "purchase_committee": "Purchase Committee",
+    "plan_synthesis": "Plan Synthesis",
+    "handbook_final_decision": "Handbook Final Decision",
     "settlement": "Settlement",
     "postmortem": "Postmortem",
 }
@@ -51,7 +64,7 @@ def _graph_period(session: dict[str, Any]) -> str:
     latest = dict(session.get("latest_prediction", {}))
     return (
         str(session.get("current_period", "")).strip()
-        or str(latest.get("period", "")).strip()
+        or str(latest.get("predicted_period", latest.get("period", ""))).strip()
         or str((session.get("settlement_history") or [{}])[-1].get("period", "")).strip()
         or "-"
     )
@@ -76,16 +89,14 @@ def _agent_nodes(nodes: dict[str, dict[str, Any]], session: dict[str, Any]) -> N
         }
 
 
-def _phase_nodes(
-    nodes: dict[str, dict[str, Any]],
-    session: dict[str, Any],
-    period: str,
-) -> dict[str, str]:
+def _phase_nodes(nodes: dict[str, dict[str, Any]], session: dict[str, Any], period: str) -> dict[str, str]:
     phase_nodes = {}
     latest_summary = dict(session.get("latest_issue_summary", {}))
     purchase = dict(session.get("latest_purchase_plan", {}))
+    latest_prediction = dict(session.get("latest_prediction", {}))
+    final_decision = dict(latest_prediction.get("final_decision") or {})
     settlement = list(session.get("settlement_history", []))
-    for phase in PHASE_ORDER:
+    for phase in _phase_order(session):
         node_id = f"phase:{phase}:{period}"
         phase_nodes[phase] = node_id
         nodes[node_id] = {
@@ -95,52 +106,37 @@ def _phase_nodes(
             "phase": phase,
             "period": period,
             "active": session.get("current_phase") == phase,
-            "numbers": _phase_numbers(phase, latest_summary, purchase, settlement),
-            "summary": _phase_summary(phase, latest_summary, purchase, settlement),
+            "numbers": _phase_numbers(phase, latest_summary, purchase, final_decision, settlement),
+            "summary": _phase_summary(phase, latest_summary, purchase, final_decision, settlement),
         }
     return phase_nodes
 
 
-def _phase_numbers(
-    phase: str,
-    latest_summary: dict[str, Any],
-    purchase: dict[str, Any],
-    settlement: list[dict[str, Any]],
-) -> list[int]:
-    if phase in {"opening", "public_debate", "judge_synthesis"}:
+def _phase_numbers(phase: str, latest_summary: dict[str, Any], purchase: dict[str, Any], final_decision: dict[str, Any], settlement: list[dict[str, Any]]) -> list[int]:
+    if phase in {"opening", "generator_opening", "public_debate", "social_propagation", "judge_synthesis", "market_rerank"}:
         return list(latest_summary.get("primary_numbers", [])) + list(latest_summary.get("alternate_numbers", []))
-    if phase == "purchase_committee":
+    if phase == "plan_synthesis":
         return list(purchase.get("primary_prediction", [])) + list(purchase.get("alternate_numbers", []))
+    if phase == "handbook_final_decision":
+        return list(final_decision.get("numbers", [])) + list(final_decision.get("alternate_numbers", []))
     if phase == "settlement" and settlement:
         return list(settlement[-1].get("actual_numbers", []))
     return []
 
 
-def _phase_summary(
-    phase: str,
-    latest_summary: dict[str, Any],
-    purchase: dict[str, Any],
-    settlement: list[dict[str, Any]],
-) -> str:
-    if phase == "purchase_committee":
+def _phase_summary(phase: str, latest_summary: dict[str, Any], purchase: dict[str, Any], final_decision: dict[str, Any], settlement: list[dict[str, Any]]) -> str:
+    if phase == "plan_synthesis":
         return f"{purchase.get('plan_type', '-')} / play {purchase.get('play_size', '-')}"
+    if phase == "handbook_final_decision":
+        return str(final_decision.get("rationale", "")).strip() or "Official final decision"
     if phase == "settlement" and settlement:
         item = settlement[-1]
-        return f"hits={item.get('consensus_hits', '-')} / best={item.get('best_hits', '-')}"
-    if phase == "postmortem" and settlement:
-        return f"best strategies={', '.join(item for item in settlement[-1].get('best_strategy_ids', [])) or '-'}"
+        return f"official_hits={item.get('official_hits', '-')} / purchase_profit={item.get('purchase_profit', '-')}"
     return str(latest_summary.get("phase", "") if phase == latest_summary.get("phase") else "").strip()
 
 
-def _event_edges(
-    nodes: dict[str, dict[str, Any]],
-    edges: dict[str, dict[str, Any]],
-    session: dict[str, Any],
-    timeline_rows: list[dict[str, Any]],
-    phase_nodes: dict[str, str],
-    period: str,
-) -> None:
-    round_index = defaultdict(int)
+def _event_edges(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, Any]], session: dict[str, Any], timeline_rows: list[dict[str, Any]], phase_nodes: dict[str, str], period: str) -> None:
+    is_v2 = _is_v2_session(session)
     for row in timeline_rows:
         if str(row.get("period", "")).strip() not in {"", "-", period}:
             continue
@@ -150,62 +146,30 @@ def _event_edges(
         source = f"agent:{actor_id}"
         event_type = str(row.get("event_type", "")).strip()
         if event_type == "prediction_post":
-            _edge(edges, source, phase_nodes["opening"], "proposed")
-        if event_type == "debate_post":
-            round_no = int(row.get("metadata", {}).get("round", 1) or 1)
-            debate_id = _debate_round_node_id(phase_nodes["public_debate"], round_no)
-            _debate_round_node(nodes, debate_id, period, round_no)
-            round_index[debate_id] += 1
-            _edge(edges, source, debate_id, "revised_to")
-            for target in row.get("metadata", {}).get("support_agent_ids", []) or []:
-                _edge(edges, source, f"agent:{target}", "supports")
-        if event_type == "purchase_proposal":
-            _edge(edges, source, phase_nodes["purchase_committee"], "proposed")
+            _edge(edges, source, phase_nodes["generator_opening" if is_v2 else "opening"], "proposed")
+        if event_type in {"live_interview", "social_post", "social_reply"} and is_v2:
+            _edge(edges, source, phase_nodes["social_propagation"], "proposed")
+        if event_type == "market_rank" and is_v2:
+            _edge(edges, source, phase_nodes["market_rerank"], "ranked")
         if event_type == "purchase_decision":
-            _edge(edges, source, phase_nodes["purchase_committee"], "purchased_from")
-    _attach_round_nodes_to_phase(phase_nodes["public_debate"], round_index, edges)
+            _edge(edges, source, phase_nodes["plan_synthesis" if is_v2 else "purchase_committee"], "purchased_from")
+        if event_type == "official_prediction" and is_v2:
+            _edge(edges, source, phase_nodes["handbook_final_decision"], "decided")
 
 
-def _debate_round_node(
-    nodes: dict[str, dict[str, Any]],
-    node_id: str,
-    period: str,
-    round_no: int,
-) -> None:
-    if node_id in nodes:
-        return
-    nodes[node_id] = {
-        "id": node_id,
-        "label": f"Debate R{round_no}",
-        "node_type": "debate_round",
-        "phase": "public_debate",
-        "period": period,
-        "active": False,
-        "numbers": [],
-        "summary": f"Round {round_no}",
-    }
-
-
-def _attach_round_nodes_to_phase(
-    phase_node_id: str,
-    round_index: dict[str, int],
-    edges: dict[str, dict[str, Any]],
-) -> None:
-    for node_id in round_index:
-        _edge(edges, node_id, phase_node_id, "revised_to")
-
-
-def _phase_edges(
-    edges: dict[str, dict[str, Any]],
-    session: dict[str, Any],
-    phase_nodes: dict[str, str],
-    period: str,
-) -> None:
-    _edge(edges, phase_nodes["opening"], phase_nodes["judge_synthesis"], "synthesized_into")
-    _edge(edges, phase_nodes["public_debate"], phase_nodes["judge_synthesis"], "synthesized_into")
-    _edge(edges, phase_nodes["purchase_committee"], phase_nodes["judge_synthesis"], "purchased_from")
+def _phase_edges(edges: dict[str, dict[str, Any]], session: dict[str, Any], phase_nodes: dict[str, str], period: str) -> None:
+    if _is_v2_session(session):
+        _edge(edges, phase_nodes["generator_opening"], phase_nodes["market_rerank"], "synthesized_into")
+        _edge(edges, phase_nodes["social_propagation"], phase_nodes["market_rerank"], "synthesized_into")
+        _edge(edges, phase_nodes["market_rerank"], phase_nodes["plan_synthesis"], "synthesized_into")
+        _edge(edges, phase_nodes["plan_synthesis"], phase_nodes["handbook_final_decision"], "synthesized_into")
+    else:
+        _edge(edges, phase_nodes["opening"], phase_nodes["judge_synthesis"], "synthesized_into")
+        _edge(edges, phase_nodes["public_debate"], phase_nodes["judge_synthesis"], "synthesized_into")
+        _edge(edges, phase_nodes["purchase_committee"], phase_nodes["judge_synthesis"], "purchased_from")
     if _settlement_for_period(session, period):
-        _edge(edges, phase_nodes["judge_synthesis"], phase_nodes["settlement"], "settled_by")
+        source_phase = "handbook_final_decision" if _is_v2_session(session) else "judge_synthesis"
+        _edge(edges, phase_nodes[source_phase], phase_nodes["settlement"], "settled_by")
         _edge(edges, phase_nodes["settlement"], phase_nodes["postmortem"], "settled_by")
 
 
@@ -215,7 +179,10 @@ def _settlement_for_period(session: dict[str, Any], period: str) -> bool:
 
 def _conflict_edges(edges: dict[str, dict[str, Any]], session: dict[str, Any]) -> None:
     numbers = {
-        item["session_agent_id"]: tuple(int(value) for value in dict(session.get("agent_state", {})).get(item["session_agent_id"], {}).get("last_numbers", []))
+        item["session_agent_id"]: tuple(
+            int(value)
+            for value in dict(session.get("agent_state", {})).get(item["session_agent_id"], {}).get("last_numbers", [])
+        )
         for item in session.get("agents", [])
         if item.get("role_kind") == "strategy"
     }
@@ -228,17 +195,15 @@ def _conflict_edges(edges: dict[str, dict[str, Any]], session: dict[str, Any]) -
             _edge(edges, f"agent:{left}", f"agent:{right}", "conflicts_with", overlap)
 
 
-def _debate_round_node_id(base_node_id: str, round_no: int) -> str:
-    return f"{base_node_id}:round:{round_no}"
+def _phase_order(session: dict[str, Any]) -> tuple[str, ...]:
+    return V2_PHASE_ORDER if _is_v2_session(session) else V1_PHASE_ORDER
 
 
-def _edge(
-    edges: dict[str, dict[str, Any]],
-    source: str,
-    target: str,
-    relation: str,
-    weight: int = 1,
-) -> None:
+def _is_v2_session(session: dict[str, Any]) -> bool:
+    return str(session.get("runtime_mode", "")).strip() == "world_v2_market"
+
+
+def _edge(edges: dict[str, dict[str, Any]], source: str, target: str, relation: str, weight: int = 1) -> None:
     edge_id = f"{source}->{relation}->{target}"
     edges[edge_id] = {
         "id": edge_id,

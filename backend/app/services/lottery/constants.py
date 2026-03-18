@@ -13,7 +13,8 @@ MAX_LLM_RETRY_COUNT = 5
 MAX_LLM_RETRY_BACKOFF_MS = 15000
 DEFAULT_AGENT_DIALOGUE_ENABLED = True
 DEFAULT_AGENT_DIALOGUE_ROUNDS = 1
-MAX_AGENT_DIALOGUE_ROUNDS = 3
+MAX_AGENT_DIALOGUE_ROUNDS = 5
+MAX_SOCIAL_AGENT_COUNT = 6
 WORLD_WARMUP_ISSUES = 3
 DEFAULT_LIVE_INTERVIEW_ENABLED = True
 DEFAULT_BUDGET_YUAN = 50
@@ -43,11 +44,11 @@ WORLD_PHASES = (
     "settle",
 )
 WORLD_V2_PHASES = (
-    "signal_opening",
+    "generator_opening",
     "social_propagation",
     "market_rerank",
-    "bettor_planning",
     "plan_synthesis",
+    "handbook_final_decision",
     "settlement",
     "postmortem",
 )

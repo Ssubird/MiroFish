@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from ....config import Config
+from ..constants import MAX_SOCIAL_AGENT_COUNT
 from ..models import PredictionContext, StrategyPrediction
 from .base import StrategyAgent
 from .llm_support import (
@@ -284,4 +285,22 @@ def build_social_agents() -> dict[str, StrategyAgent]:
             social_mode="risk",
         ),
     )
+    _validate_social_agent_roster(agents)
     return {agent.strategy_id: agent for agent in agents}
+
+
+def _validate_social_agent_roster(
+    agents: tuple[SocialDiscussionAgent, ...],
+) -> None:
+    if len(agents) > MAX_SOCIAL_AGENT_COUNT:
+        raise ValueError(
+            f"social agent roster must stay <= {MAX_SOCIAL_AGENT_COUNT}, got {len(agents)}"
+        )
+    seen_modes: set[str] = set()
+    for agent in agents:
+        mode = str(agent.social_mode).strip()
+        if not mode:
+            raise ValueError(f"social agent {agent.strategy_id} is missing social_mode")
+        if mode in seen_modes:
+            raise ValueError(f"duplicate social_mode detected: {mode}")
+        seen_modes.add(mode)

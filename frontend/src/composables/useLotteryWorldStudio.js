@@ -1,6 +1,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { advanceLotteryWorld, evolutionLotteryWorld } from '../api/lottery'
+import {
+  advanceLotteryWorld,
+  getLotteryWorldRuntimeReadiness
+} from '../api/lottery'
 import { useLotterySetup } from './useLotterySetup'
 import { useLotteryWorld } from './useLotteryWorld'
 
@@ -8,17 +11,20 @@ import { useLotteryWorld } from './useLotteryWorld'
 const DEFAULT_BUDGET_YUAN = 50
 const DEFAULT_LLM_PARALLELISM = 8
 const DEFAULT_DIALOGUE_ROUNDS = 1
+const MAX_DIALOGUE_ROUNDS = 5
+const ACTIVE_SESSION_STATUSES = new Set(['queued', 'running'])
 
 
 export const useLotteryWorldStudio = () => {
   const error = ref('')
   const running = ref(false)
   const runMessage = ref('')
+  const runtimeReadiness = ref(null)
+  const runtimeReadinessLoading = ref(false)
   const budgetYuan = ref(DEFAULT_BUDGET_YUAN)
   const llmParallelism = ref(DEFAULT_LLM_PARALLELISM)
   const agentDialogueRounds = ref(DEFAULT_DIALOGUE_ROUNDS)
-  const evolutionIterations = ref(3)
-  const targetPeriod = ref('')
+  const visibleThroughPeriod = ref('')
   const liveInterviewEnabled = ref(true)
   const selectedStrategyIds = ref([])
   const selectedGraphNodeId = ref('')
@@ -31,23 +37,40 @@ export const useLotteryWorldStudio = () => {
   const setup = useLotterySetup(setError)
   const world = useLotteryWorld(setError)
 
-  const busy = computed(() => setup.loadingOverview.value || setup.llmModelLoading.value || world.worldLoading.value || running.value)
+  const loading = computed(() => (
+    setup.loadingOverview.value
+    || world.worldLoading.value
+    || runtimeReadinessLoading.value
+  ))
+  const busy = computed(() => loading.value || running.value)
   const availableStrategies = computed(() => setup.availableStrategies.value)
   const historyPeriods = computed(() => setup.overview.value?.history_periods || [])
   const session = computed(() => world.worldSession.value?.session || null)
   const currentSessionId = computed(() => session.value?.session_id || '')
-  const latestPrediction = computed(() => world.worldResult.value?.pending_prediction || session.value?.latest_prediction || null)
-  const latestPurchasePlan = computed(() => session.value?.latest_purchase_plan || latestPrediction.value?.purchase_plan || null)
+  const latestPrediction = computed(() => (
+    world.worldResult.value?.pending_prediction || session.value?.latest_prediction || null
+  ))
+  const latestPurchasePlan = computed(() => (
+    session.value?.latest_purchase_plan || latestPrediction.value?.purchase_recommendation || null
+  ))
   const latestSettlement = computed(() => {
     const rows = session.value?.settlement_history || []
     return rows.length ? rows[rows.length - 1] : null
   })
   const graphNodes = computed(() => world.worldGraph.value?.nodes || [])
-  const selectedGraphNode = computed(() => graphNodes.value.find((item) => item.id === selectedGraphNodeId.value) || null)
+  const selectedGraphNode = computed(() => (
+    graphNodes.value.find((item) => item.id === selectedGraphNodeId.value) || null
+  ))
   const recentNumbers = computed(() => world.recentDrawStats.value?.numbers || [])
-  const selectedNumberDetail = computed(() => recentNumbers.value.find((item) => item.number === selectedNumber.value) || null)
+  const selectedNumberDetail = computed(() => (
+    recentNumbers.value.find((item) => item.number === selectedNumber.value) || null
+  ))
   const activeModelName = computed(() => setup.selectedModelName.value || setup.llmStatus.value?.model || '')
-  const canAdvance = computed(() => !busy.value && sanitizedStrategyIds().length > 0)
+  const canAdvance = computed(() => (
+    !busy.value
+    && runtimeReadiness.value?.ready === true
+    && sanitizedStrategyIds().length > 0
+  ))
 
   const sanitizedStrategyIds = () => {
     const availableIds = new Set(availableStrategies.value.map((item) => item.strategy_id))
@@ -59,17 +82,48 @@ export const useLotteryWorldStudio = () => {
     selectedStrategyIds.value = next.length ? next : availableStrategies.value.map((item) => item.strategy_id)
   }
 
-  const updateRunMessage = (snapshot) => {
+  const clearRunState = () => {
+    runMessage.value = ''
+    running.value = false
+  }
+
+  const loadRuntimeReadiness = async () => {
+    runtimeReadinessLoading.value = true
+    try {
+      const response = await getLotteryWorldRuntimeReadiness()
+      runtimeReadiness.value = response.data
+    } catch (err) {
+      runtimeReadiness.value = null
+      setError(err.message || '读取运行前置条件失败')
+    } finally {
+      runtimeReadinessLoading.value = false
+    }
+  }
+
+  const updateRunMessage = (snapshot, options = {}) => {
+    const { adoptActiveStatus = true } = options
     const activeSession = snapshot?.session?.session
-    if (!activeSession) {
-      runMessage.value = ''
-      running.value = false
+    if (!activeSession || !adoptActiveStatus) {
+      clearRunState()
       return
     }
+
     const requestCount = Number(activeSession.request_metrics?.send_message || 0)
     const nodeCount = Number(snapshot.graph?.metrics?.node_count || 0)
-    runMessage.value = `状态 ${activeSession.status || '-'} / 阶段 ${activeSession.current_phase || '-'} / LLM 请求 ${requestCount} / 图节点 ${nodeCount}`
-    running.value = activeSession.status === 'running'
+    const progress = activeSession.progress || {}
+    const dialogueTotal = Number(progress.dialogue_round_total || 0)
+    const dialogueText = dialogueTotal > 0
+      ? ` / 讨论 ${progress.dialogue_round_index || 0}/${dialogueTotal}`
+      : ''
+    runMessage.value = `状态 ${activeSession.status || '-'} / 阶段 ${activeSession.current_phase || '-'}${dialogueText} / LLM 请求 ${requestCount} / 图节点 ${nodeCount}`
+
+    if (activeSession.status === 'failed' && activeSession.error?.message) {
+      error.value = activeSession.error.message
+    } else if (activeSession.status !== 'failed') {
+      error.value = ''
+    }
+
+    running.value = ACTIVE_SESSION_STATUSES.has(activeSession.status)
   }
 
   const ensureSelections = () => {
@@ -82,22 +136,39 @@ export const useLotteryWorldStudio = () => {
   }
 
   const loadAll = async () => {
-    await setup.loadOverview(syncSelectedStrategies)
-    await setup.loadModels()
-    const snapshot = await world.loadCurrentWorld()
-    if (snapshot) updateRunMessage(snapshot)
-    if (snapshot?.session?.session?.status === 'running') {
-      world.startPolling(snapshot.session.session.session_id, updateRunMessage)
+    const [, , snapshot] = await Promise.all([
+      setup.loadOverview(syncSelectedStrategies),
+      loadRuntimeReadiness(),
+      world.loadCurrentWorld(),
+      setup.loadModels()
+    ])
+    const sessionId = snapshot?.session?.session?.session_id || ''
+    const status = snapshot?.session?.session?.status || ''
+    if (snapshot) {
+      updateRunMessage(snapshot)
+      if (sessionId && ACTIVE_SESSION_STATUSES.has(status)) {
+        world.startPolling(sessionId, updateRunMessage)
+      } else {
+        world.stopPolling()
+      }
+    } else {
+      clearRunState()
+      world.stopPolling()
     }
     ensureSelections()
+  }
+
+  const loadModels = async () => {
+    await setup.loadModels()
   }
 
   const advanceWorld = async () => {
     if (!canAdvance.value) return
     error.value = ''
     running.value = true
-    runMessage.value = '正在同步状态并推进世界模拟...'
+    runMessage.value = '正在按可见截止期推进模拟世界...'
     world.stopPolling()
+
     try {
       const strategyIds = sanitizedStrategyIds()
       selectedStrategyIds.value = [...strategyIds]
@@ -107,10 +178,11 @@ export const useLotteryWorldStudio = () => {
         llm_parallelism: llmParallelism.value,
         issue_parallelism: 1,
         agent_dialogue_enabled: agentDialogueRounds.value > 0,
-        agent_dialogue_rounds: agentDialogueRounds.value,
+        agent_dialogue_rounds: Math.min(Math.max(agentDialogueRounds.value, 0), MAX_DIALOGUE_ROUNDS),
         live_interview_enabled: liveInterviewEnabled.value,
         budget_yuan: budgetYuan.value,
-        session_id: currentSessionId.value || undefined
+        session_id: currentSessionId.value || undefined,
+        visible_through_period: visibleThroughPeriod.value || undefined
       })
       const sessionId = response.data?.world_session?.session_id || ''
       const snapshot = await world.loadWorld(sessionId)
@@ -118,53 +190,16 @@ export const useLotteryWorldStudio = () => {
       if (sessionId) world.startPolling(sessionId, updateRunMessage)
       ensureSelections()
     } catch (err) {
-      running.value = false
-      runMessage.value = ''
+      clearRunState()
       error.value = err.message || '推进世界失败'
-    }
-  }
-
-  const evolutionWorld = async () => {
-    if (!canAdvance.value) return
-    error.value = ''
-    running.value = true
-    runMessage.value = `正在隐匿进行 ${evolutionIterations.value} 轮净化预测并复盘...`
-    world.stopPolling()
-    try {
-      const strategyIds = sanitizedStrategyIds()
-      selectedStrategyIds.value = [...strategyIds]
-      const response = await evolutionLotteryWorld({
-        strategy_ids: strategyIds,
-        iterations: evolutionIterations.value,
-        llm_model_name: setup.selectedModelName.value || undefined,
-        llm_parallelism: llmParallelism.value,
-        issue_parallelism: 1,
-        agent_dialogue_enabled: agentDialogueRounds.value > 0,
-        agent_dialogue_rounds: agentDialogueRounds.value,
-        live_interview_enabled: liveInterviewEnabled.value,
-        budget_yuan: budgetYuan.value,
-        session_id: currentSessionId.value || undefined
-      })
-      // Start polling the session to update the UI organically
-      const sessionId = response.data?.world_session?.session_id || currentSessionId.value || ''
-      if (sessionId) {
-        const snapshot = await world.loadWorld(sessionId)
-        if (snapshot) updateRunMessage(snapshot)
-        world.startPolling(sessionId, updateRunMessage)
-      }
-      ensureSelections()
-    } catch (err) {
-      running.value = false
-      runMessage.value = ''
-      error.value = err.message || '进化推演失败'
+      await loadRuntimeReadiness()
     }
   }
 
   const resetWorld = async () => {
     const ok = await world.resetWorld()
     if (!ok) return
-    running.value = false
-    runMessage.value = ''
+    clearRunState()
     selectedGraphNodeId.value = ''
     selectedNumber.value = null
   }
@@ -199,11 +234,12 @@ export const useLotteryWorldStudio = () => {
     busy,
     running,
     runMessage,
+    runtimeReadiness,
+    runtimeReadinessLoading,
     budgetYuan,
     llmParallelism,
     agentDialogueRounds,
-    evolutionIterations,
-    targetPeriod,
+    visibleThroughPeriod,
     liveInterviewEnabled,
     selectedStrategyIds,
     selectedGraphNodeId,
@@ -213,7 +249,9 @@ export const useLotteryWorldStudio = () => {
     llmModels: setup.llmModels,
     selectedModelName: setup.selectedModelName,
     modelProbeResult: setup.modelProbeResult,
+    modelListStatus: setup.modelListStatus,
     llmModelLoading: setup.llmModelLoading,
+    loadModels,
     activeModelName,
     session: world.worldSession,
     worldTimeline: world.worldTimeline,
@@ -229,7 +267,6 @@ export const useLotteryWorldStudio = () => {
     worldInterviewBusy: world.worldInterviewBusy,
     canAdvance,
     advanceWorld,
-    evolutionWorld,
     resetWorld,
     refreshWorld,
     submitInterview: () => world.submitWorldInterview(currentSessionId.value),

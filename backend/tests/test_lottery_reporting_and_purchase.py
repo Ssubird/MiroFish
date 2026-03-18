@@ -96,10 +96,12 @@ def test_purchase_prompt_guidance_forces_play_size_comparison():
     schema = purchase_schema()
 
     assert "Compare all available play sizes" in rule_block
+    assert "Do not place illustrative, backup, or reference-only legs inside portfolio_legs." in rule_block
     assert "Multiplier: 1-15x" in rule_block
     assert '"play_size_review"' in schema
     assert '"chosen_edge"' in schema
     assert '"portfolio_legs"' in schema
+    assert "do not put illustrative or reference-only alternatives into portfolio_legs" in schema
 
 
 def test_purchase_discussion_messages_include_budget_primary_and_alternates():
@@ -173,8 +175,8 @@ def test_purchase_discussion_messages_include_budget_primary_and_alternates():
     prompt = messages[1]["content"]
 
     assert "Budget: 50 yuan" in prompt
-    assert "Primary Prediction (5 numbers): [78, 42, 7, 44, 5]" in prompt
-    assert "Alternate Numbers: [19, 23, 61]" in prompt
+    assert "Reference Ticket (5 numbers): [78, 42, 7, 44, 5]" in prompt
+    assert "Hedge Pool: [19, 23, 61]" in prompt
     assert "External Reports:" in prompt
     assert "Persistent Social State:" in prompt
 
@@ -292,11 +294,65 @@ def test_markdown_report_contains_purchase_committee_and_discussion():
             "ensemble_numbers": [78, 42, 7, 44, 5],
             "alternate_numbers": [19, 23, 61],
             "ensemble_breakdown": [{"number": 78, "score": 3.0, "sources": ["Cold 50"]}],
+            "signal_outputs": [
+                {
+                    "strategy_id": "cold_50",
+                    "regime_label": "cold",
+                    "play_size_bias": 5,
+                    "structure_bias": "wheel",
+                    "number_scores": {"78": 5.0, "42": 4.5, "19": 3.2},
+                    "evidence_refs": ["prediction_report.md:1"],
+                    "public_post": "Cold numbers still lead.",
+                }
+            ],
             "performance_context": [],
             "strategy_predictions": [],
             "coordination_trace": [],
             "social_state": {},
             "world_state": {},
+            "bet_plans": {
+                "steady_bettor": {
+                    "display_name": "Steady Bettor",
+                    "plan_type": "wheel",
+                    "play_size": 5,
+                    "total_cost_yuan": 12,
+                    "risk_exposure": "balanced",
+                    "trusted_strategy_ids": ["cold_50"],
+                    "rationale": "Keep one core ticket with a light hedge.",
+                    "plan_structure": {
+                        "primary_ticket": [78, 42, 7, 44, 5],
+                        "wheel_numbers": [78, 42, 7, 44, 5, 19],
+                        "combination_count": 6,
+                    },
+                    "legs": [
+                        {
+                            "plan_type": "wheel",
+                            "play_size": 5,
+                            "numbers": [78, 42, 7, 44, 5],
+                        }
+                    ],
+                }
+            },
+            "market_synthesis": {
+                "reference_plan_id": "purchase_chair",
+                "reference_leg": {
+                    "plan_type": "wheel",
+                    "play_size": 5,
+                    "numbers": [78, 42, 7, 44, 5],
+                },
+                "hedge_pool": [19, 23, 61],
+                "consensus_number_scores": [{"number": 78, "score": 9.5}, {"number": 42, "score": 8.7}],
+                "total_market_volume_yuan": 12,
+                "active_bettor_count": 1,
+                "trusted_strategy_ids": ["cold_50"],
+                "rationale": "Adopt the market reference ticket and keep a compact hedge pool.",
+            },
+            "judge_decision": {
+                "primary_numbers": [78, 42, 7, 44, 5],
+                "alternate_numbers": [19, 23, 61],
+                "trusted_strategy_ids": ["cold_50"],
+                "rationale": "Compatibility projection from market synthesis.",
+            },
             "purchase_plan": {
                 "status": "ready",
                 "game": "Happy 8",
@@ -363,9 +419,15 @@ def test_markdown_report_contains_purchase_committee_and_discussion():
 
     report = build_markdown_report(payload)
 
-    assert "Alternate 3 Numbers" in report
+    assert "Reference Ticket" in report
+    assert "Hedge Pool" in report
+    assert "### Signal Outputs" in report
+    assert "### Market Bet Plans" in report
+    assert "### Market Synthesis" in report
+    assert "### Judge Projection (Compatibility)" in report
     assert "### Purchase Plan" in report
     assert "#### Purchase Committee" in report
     assert "#### Purchase Discussion" in report
-    assert "Primary Prediction" in report
+    assert "Primary Prediction" not in report
+    assert "Alternate 3 Numbers" not in report
     assert "Planner Prompt Preview" in report

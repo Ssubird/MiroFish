@@ -11,6 +11,13 @@ from .helpers import energy_similarity, rank_scores, recent_history, select_numb
 
 GROUP = "metaphysics"
 GRAPH_HIGHLIGHT_LIMIT = 6
+STEM_BRANCH_WINDOW = 240
+GRAPH_WINDOW = 180
+CHART_WINDOW = 120
+STEM_BRANCH_WEIGHT = 1.0
+GRAPH_WEIGHT = 0.25
+SIMILARITY_WEIGHT = 1.8
+CHART_WEIGHT = 3.0
 
 
 def _chart_lookup(context: PredictionContext) -> dict[str, ChartProfile]:
@@ -44,103 +51,97 @@ def _chart_terms(chart: ChartProfile | None, draw) -> tuple[str, ...]:
     return _terms_for_draw(draw)
 
 
-@dataclass(frozen=True)
-class StemBranchMatchAgent(StrategyAgent):
-    window: int
+def _stem_branch_component(context: PredictionContext) -> dict[int, float]:
+    segment = recent_history(context.history_draws, STEM_BRANCH_WINDOW)
+    total = len(segment)
+    scores = {number: 0.0 for number in range(1, 81)}
+    for index, draw in enumerate(segment, start=1):
+        draw_score = 0.0
+        draw_score += 3.0 * (draw.daily_energy.stem == context.target_draw.daily_energy.stem)
+        draw_score += 3.0 * (draw.daily_energy.branch == context.target_draw.daily_energy.branch)
+        draw_score += 2.0 * (draw.hourly_energy.stem == context.target_draw.hourly_energy.stem)
+        draw_score += 2.0 * (draw.hourly_energy.branch == context.target_draw.hourly_energy.branch)
+        if draw_score <= 0:
+            continue
+        factor = 1.0 + (index / max(total, 1)) * 0.35
+        for number in draw.numbers:
+            scores[number] += draw_score * factor * STEM_BRANCH_WEIGHT
+    return scores
 
+
+def _graph_component(context: PredictionContext) -> dict[int, float]:
+    segment = recent_history(context.history_draws, GRAPH_WINDOW)
+    scores = {number: 0.0 for number in range(1, 81)}
+    for draw in segment:
+        resonance = _graph_weight(context, _terms_for_draw(draw))
+        similarity = energy_similarity(draw, context.target_draw)
+        total_score = resonance * GRAPH_WEIGHT + similarity * SIMILARITY_WEIGHT
+        if total_score <= 0:
+            continue
+        for number in draw.numbers:
+            scores[number] += total_score
+    return scores
+
+
+def _chart_component(context: PredictionContext) -> dict[int, float]:
+    scores = {number: 0.0 for number in range(1, 81)}
+    if not context.chart_profiles:
+        return scores
+    segment = recent_history(context.history_draws, CHART_WINDOW)
+    lookup = _chart_lookup(context)
+    target_terms = _chart_terms(lookup.get(context.target_draw.period), context.target_draw)
+    for draw in segment:
+        draw_terms = _chart_terms(lookup.get(draw.period), draw)
+        overlap = len(set(draw_terms) & set(target_terms))
+        chart_score = overlap * CHART_WEIGHT
+        if chart_score <= 0:
+            continue
+        similarity = energy_similarity(draw, context.target_draw)
+        for number in draw.numbers:
+            scores[number] += chart_score + similarity
+    return scores
+
+
+def _merge_scores(*parts: dict[int, float]) -> dict[int, float]:
+    scores = {number: 0.0 for number in range(1, 81)}
+    for part in parts:
+        for number, value in part.items():
+            scores[number] += value
+    return scores
+
+
+@dataclass(frozen=True)
+class MetaphysicsFusedBoardAgent(StrategyAgent):
     def predict(self, context: PredictionContext, pick_size: int) -> StrategyPrediction:
         self.ensure_history(context)
-        segment = recent_history(context.history_draws, self.window)
-        scores = {number: 0.0 for number in range(1, 81)}
-        total = len(segment)
-        for index, draw in enumerate(segment, start=1):
-            draw_score = 0.0
-            draw_score += 3.0 * (draw.daily_energy.stem == context.target_draw.daily_energy.stem)
-            draw_score += 3.0 * (draw.daily_energy.branch == context.target_draw.daily_energy.branch)
-            draw_score += 2.0 * (draw.hourly_energy.stem == context.target_draw.hourly_energy.stem)
-            draw_score += 2.0 * (draw.hourly_energy.branch == context.target_draw.hourly_energy.branch)
-            if draw_score <= 0:
-                continue
-            factor = 1.0 + (index / total) * 0.35
-            for number in draw.numbers:
-                scores[number] += draw_score * factor
-        return StrategyPrediction(
-            strategy_id=self.strategy_id,
-            display_name=self.display_name,
-            group=self.group,
-            numbers=select_numbers(scores, pick_size),
-            rationale=f"按最近 {self.window} 期干支结构的相近度回看历史开奖。",
-            ranked_scores=rank_scores(scores, pick_size),
-        )
-
-
-@dataclass(frozen=True)
-class GraphResonanceAgent(StrategyAgent):
-    window: int
-
-    def predict(self, context: PredictionContext, pick_size: int) -> StrategyPrediction:
-        self.ensure_history(context)
-        segment = recent_history(context.history_draws, self.window)
-        scores = {number: 0.0 for number in range(1, 81)}
+        stem_branch_scores = _stem_branch_component(context)
+        graph_scores = _graph_component(context)
+        chart_scores = _chart_component(context)
+        scores = _merge_scores(stem_branch_scores, graph_scores, chart_scores)
         highlights = context.graph_snapshot.highlights[:GRAPH_HIGHLIGHT_LIMIT]
-        for draw in segment:
-            resonance = _graph_weight(context, _terms_for_draw(draw))
-            similarity = energy_similarity(draw, context.target_draw)
-            total_score = resonance * 0.25 + similarity * 1.8
-            if total_score <= 0:
-                continue
-            for number in draw.numbers:
-                scores[number] += total_score
         return StrategyPrediction(
             strategy_id=self.strategy_id,
             display_name=self.display_name,
             group=self.group,
             numbers=select_numbers(scores, pick_size),
-            rationale=f"把本地图谱高频概念 {', '.join(highlights) or '无'} 与能量相似样本一起加权。",
+            rationale=(
+                "Fuse stem-branch matches, chart mapping, and graph resonance into one board. "
+                f"Highlights: {', '.join(highlights) or 'none'}."
+            ),
             ranked_scores=rank_scores(scores, pick_size),
             metadata={"graph_snapshot": context.graph_snapshot.snapshot_id},
         )
 
 
-@dataclass(frozen=True)
-class ChartSignatureAgent(StrategyAgent):
-    window: int
-
-    def predict(self, context: PredictionContext, pick_size: int) -> StrategyPrediction:
-        self.ensure_history(context)
-        if not context.chart_profiles:
-            raise ValueError(f"{self.display_name} 需要命盘数据文件")
-        segment = recent_history(context.history_draws, self.window)
-        lookup = _chart_lookup(context)
-        target_terms = _chart_terms(lookup.get(context.target_draw.period), context.target_draw)
-        scores = {number: 0.0 for number in range(1, 81)}
-        for draw in segment:
-            draw_terms = _chart_terms(lookup.get(draw.period), draw)
-            overlap = len(set(draw_terms) & set(target_terms))
-            chart_score = overlap * 3.0
-            if chart_score <= 0:
-                continue
-            similarity = energy_similarity(draw, context.target_draw)
-            for number in draw.numbers:
-                scores[number] += chart_score + similarity
-        return StrategyPrediction(
-            strategy_id=self.strategy_id,
-            display_name=self.display_name,
-            group=self.group,
-            numbers=select_numbers(scores, pick_size),
-            rationale="直接比对 draw 文件里的历史命盘与目标期命盘，再聚合对应历史号码。",
-            ranked_scores=rank_scores(scores, pick_size),
-            metadata={"chart_count": len(context.chart_profiles)},
-        )
-
-
 def build_metaphysics_agents(chart_count: int) -> dict[str, StrategyAgent]:
-    agents = [
-        StemBranchMatchAgent("stem_branch_240", "干支匹配-240期", "用目标期干支映射相似历史样本。", 240, GROUP, window=240),
-        GraphResonanceAgent("graph_resonance_180", "图谱共振-180期", "让紫微书与命盘图谱参与号码打分。", 180, GROUP, window=180),
-    ]
+    required_history = max(STEM_BRANCH_WINDOW, GRAPH_WINDOW)
     if chart_count > 0:
-        agents.append(
-            ChartSignatureAgent("chart_signature_120", "命盘映射-120期", "用命盘特征和目标期能量共同筛样本。", 120, GROUP, window=120)
-        )
-    return {agent.strategy_id: agent for agent in agents}
+        required_history = max(required_history, CHART_WINDOW)
+    agent = MetaphysicsFusedBoardAgent(
+        "metaphysics_fused_board",
+        "Metaphysics Fused Board",
+        "Fuse stem-branch, chart mapping, and graph resonance.",
+        required_history,
+        GROUP,
+    )
+    return {agent.strategy_id: agent}

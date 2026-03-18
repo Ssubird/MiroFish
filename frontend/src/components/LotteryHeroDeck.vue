@@ -13,19 +13,19 @@
         <span>{{ llmCount }} 个 LLM</span>
         <span>预计请求 {{ estimatedCalls }}</span>
         <span>{{ activeModelName }}</span>
-        <span>{{ runtimeMode === 'world_v1' ? '持续世界' : '经典回测' }}</span>
-        <span v-if="runtimeMode === 'world_v1'">固定 5 主号 + 3 备号</span>
+        <span>{{ runtimeMode === 'legacy' ? '经典回测' : '市场持续世界' }}</span>
+        <span v-if="runtimeMode !== 'legacy'">参考票 + 对冲号 + 市场计划</span>
       </div>
     </div>
 
     <aside class="hero-side">
       <div class="hero-card">
         <p class="eyebrow">COMMAND CENTER</p>
-        <h2>{{ runtimeMode === 'world_v1' ? '本轮同步并推进' : '本轮回测摘要' }}</h2>
+        <h2>{{ runtimeMode === 'legacy' ? '本轮回测摘要' : '本轮同步并推进' }}</h2>
         <div class="hero-stats">
           <article>
-            <span>{{ runtimeMode === 'world_v1' ? '当前模式' : '回测窗口' }}</span>
-            <strong>{{ runtimeMode === 'world_v1' ? '持续世界' : evaluationSize }}</strong>
+            <span>{{ runtimeMode === 'legacy' ? '回测窗口' : '当前模式' }}</span>
+            <strong>{{ runtimeMode === 'legacy' ? evaluationSize : '市场持续世界' }}</strong>
           </article>
           <article>
             <span>每个 agent 选号</span>
@@ -36,20 +36,20 @@
             <strong>x{{ stageParallelism }}</strong>
           </article>
           <article>
-            <span>{{ runtimeMode === 'world_v1' ? '状态保留' : '验证并发' }}</span>
-            <strong>{{ runtimeMode === 'world_v1' ? 'ON' : `x${issueParallelism}` }}</strong>
+            <span>{{ runtimeMode === 'legacy' ? '验证并发' : '状态保留' }}</span>
+            <strong>{{ runtimeMode === 'legacy' ? `x${issueParallelism}` : 'ON' }}</strong>
           </article>
           <article>
             <span>实时访谈</span>
             <strong>{{ liveInterviewEnabled ? 'ON' : 'OFF' }}</strong>
           </article>
           <article>
-            <span>{{ runtimeMode === 'world_v1' ? '固定预热' : '对话轮数' }}</span>
-            <strong>{{ runtimeMode === 'world_v1' ? warmupSize : (dialogueEnabled ? dialogueRounds : 0) }}</strong>
+            <span>{{ runtimeMode === 'legacy' ? '对话轮数' : '固定预热' }}</span>
+            <strong>{{ runtimeMode === 'legacy' ? (dialogueEnabled ? dialogueRounds : 0) : warmupSize }}</strong>
           </article>
         </div>
         <button class="run-btn" :disabled="!canRun || busy" @click="$emit('run')">
-          {{ busy ? '运行中...' : (runtimeMode === 'world_v1' ? '同步并推进' : '运行回测') }}
+          {{ busy ? '运行中...' : (runtimeMode === 'legacy' ? '运行回测' : '同步并推进') }}
         </button>
         <button class="ghost-btn" :disabled="busy" @click="$emit('refresh')">刷新工作区</button>
       </div>
@@ -64,7 +64,7 @@
           <span>请求间隔：{{ delayMs }} ms</span>
           <span>重试退避：{{ retryBackoffMs }} ms</span>
           <span>瞬时重试：{{ retryCount }}</span>
-          <span v-if="runtimeMode !== 'world_v1'">对话轮数：{{ dialogueEnabled ? dialogueRounds : 0 }}</span>
+          <span v-if="runtimeMode === 'legacy'">对话轮数：{{ dialogueEnabled ? dialogueRounds : 0 }}</span>
           <span v-if="isLongRun">当前请求较重，页面会持续展示中间状态。</span>
         </div>
       </div>
@@ -90,7 +90,7 @@ defineProps({
   retryBackoffMs: { type: Number, default: 1500 },
   stageParallelism: { type: Number, default: 1 },
   issueParallelism: { type: Number, default: 1 },
-  runtimeMode: { type: String, default: 'legacy' },
+  runtimeMode: { type: String, default: 'world_v2_market' },
   warmupSize: { type: Number, default: 3 },
   liveInterviewEnabled: { type: Boolean, default: true },
   isLongRun: { type: Boolean, default: false }
