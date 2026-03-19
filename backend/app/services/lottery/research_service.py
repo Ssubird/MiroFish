@@ -207,6 +207,7 @@ class LotteryResearchService:
             session_id,
         )
         assets = self.runtime.load_workspace()
+        self._ensure_world_v2_kuzu_synced(runtime_mode, assets)
         selected = select_strategies(assets.strategies, strategy_ids)
         if runtime_mode == LEGACY_RUNTIME_MODE:
             validate_dataset(
@@ -259,6 +260,8 @@ class LotteryResearchService:
         del evaluation_size
         self.ensure_world_runtime_ready(runtime_mode)
         visible_through_period = _optional_string(visible_through_period)
+        full_assets = self.runtime.load_workspace()
+        self._ensure_world_v2_kuzu_synced(runtime_mode, full_assets)
         options = self._build_options(
             DEFAULT_EVALUATION_SIZE,
             pick_size,
@@ -280,7 +283,7 @@ class LotteryResearchService:
         )
         if assets is None:
             assets = self._assets_for_visible_through_period(
-                self.runtime.load_workspace(),
+                full_assets,
                 visible_through_period,
             )
 
@@ -318,6 +321,8 @@ class LotteryResearchService:
             raise ValueError(f"prepare_world_session unsupported mode: {runtime_mode}")
         self.ensure_world_runtime_ready(runtime_mode)
         visible_through_period = _optional_string(visible_through_period)
+        full_assets = self.runtime.load_workspace()
+        self._ensure_world_v2_kuzu_synced(runtime_mode, full_assets)
         options = self._build_options(
             evaluation_size,
             pick_size,
@@ -338,7 +343,7 @@ class LotteryResearchService:
             session_id,
         )
         assets = self._assets_for_visible_through_period(
-            self.runtime.load_workspace(),
+            full_assets,
             visible_through_period,
         )
         selected = self._selected_world_strategies(assets, strategy_ids, runtime_mode)
@@ -455,6 +460,26 @@ class LotteryResearchService:
             strategy_id: market_catalog.get(strategy_id, strategy)
             for strategy_id, strategy in selected.items()
         }
+
+    def _ensure_world_v2_kuzu_synced(
+        self,
+        runtime_mode: str,
+        assets: WorkspaceAssets,
+    ) -> dict[str, object] | None:
+        if runtime_mode != WORLD_V2_MARKET_RUNTIME_MODE:
+            return None
+        target_draw = assets.pending_draws[-1] if assets.pending_draws else None
+        graph_docs = [
+            *grounding_documents(assets.knowledge_documents, target_draw),
+            *prompt_documents(assets.knowledge_documents),
+        ]
+        return self.kuzu_graph_service.sync_workspace(
+            graph_docs,
+            assets.chart_profiles,
+            assets.completed_draws,
+            assets.pending_draws,
+            False,
+        )
 
     def _assets_for_visible_through_period(
         self,

@@ -64,6 +64,7 @@ export const useLotterySetup = (setError) => {
       if (onLoaded) onLoaded(payload)
     } catch (err) {
       setError(err.message || '读取工作区概览失败')
+      return null
     } finally {
       loadingOverview.value = false
     }
@@ -114,8 +115,9 @@ export const useLotterySetup = (setError) => {
   const syncGraph = async (mode, force, onLoaded = null) => {
     graphSyncing.value = true
     try {
-      await syncLotteryGraph(mode, force)
+      const payload = unwrapApiPayload(await syncLotteryGraph(mode, force))
       await loadOverview(onLoaded)
+      return payload
     } catch (err) {
       setError(err.message || '同步图谱失败')
     } finally {

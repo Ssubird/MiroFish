@@ -45,6 +45,7 @@ export const useLotteryWorldStudio = () => {
   const busy = computed(() => loading.value || running.value)
   const availableStrategies = computed(() => setup.availableStrategies.value)
   const historyPeriods = computed(() => setup.overview.value?.history_periods || [])
+  const kuzuGraphStatus = computed(() => setup.kuzuGraphStatus.value || {})
   const session = computed(() => world.worldSession.value?.session || null)
   const currentSessionId = computed(() => session.value?.session_id || '')
   const latestPrediction = computed(() => (
@@ -70,6 +71,9 @@ export const useLotteryWorldStudio = () => {
     !busy.value
     && runtimeReadiness.value?.ready === true
     && sanitizedStrategyIds().length > 0
+  ))
+  const kuzuSyncRequired = computed(() => (
+    !kuzuGraphStatus.value?.available || Boolean(kuzuGraphStatus.value?.is_stale)
   ))
 
   const sanitizedStrategyIds = () => {
@@ -162,6 +166,11 @@ export const useLotteryWorldStudio = () => {
     await setup.loadModels()
   }
 
+  const syncKuzuGraph = async (force = false) => {
+    const payload = await setup.syncGraph('kuzu', force, syncSelectedStrategies)
+    return Boolean(payload)
+  }
+
   const advanceWorld = async () => {
     if (!canAdvance.value) return
     error.value = ''
@@ -170,6 +179,15 @@ export const useLotteryWorldStudio = () => {
     world.stopPolling()
 
     try {
+      if (kuzuSyncRequired.value) {
+        runMessage.value = '姝ｅ湪鍚屾 Kuzu 鍥捐氨...'
+        const synced = await syncKuzuGraph(false)
+        if (!synced) {
+          clearRunState()
+          return
+        }
+        runMessage.value = 'Kuzu 鍥捐氨宸插悓姝ワ紝姝ｅ湪鎺ㄨ繘妯℃嫙涓栫晫...'
+      }
       const strategyIds = sanitizedStrategyIds()
       selectedStrategyIds.value = [...strategyIds]
       const response = await advanceLotteryWorld({
@@ -236,6 +254,8 @@ export const useLotteryWorldStudio = () => {
     runMessage,
     runtimeReadiness,
     runtimeReadinessLoading,
+    graphSyncing: setup.graphSyncing,
+    kuzuGraphStatus,
     budgetYuan,
     llmParallelism,
     agentDialogueRounds,
@@ -266,6 +286,7 @@ export const useLotteryWorldStudio = () => {
     worldInterviewPrompt: world.worldInterviewPrompt,
     worldInterviewBusy: world.worldInterviewBusy,
     canAdvance,
+    syncKuzuGraph,
     advanceWorld,
     resetWorld,
     refreshWorld,

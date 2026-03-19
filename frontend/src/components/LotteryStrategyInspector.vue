@@ -47,7 +47,10 @@
           <strong>最新待预测期输出</strong>
           <span>{{ latestPrediction.strategy_id }}</span>
         </div>
-        <p class="rationale">{{ latestPrediction.rationale }}</p>
+        <p class="rationale">
+          {{ shortText(latestPrediction.rationale, 180) }}
+          <button v-if="(latestPrediction.rationale || '').length > 180" class="text-link" @click="$emit('view-details', {title: '预测理由', content: latestPrediction.rationale})">阅读全文</button>
+        </p>
         <div class="chips">
           <span v-for="num in latestPrediction.numbers" :key="`${latestPrediction.strategy_id}-${num}`" class="chip">
             {{ num }}
@@ -76,8 +79,10 @@
 
         <div v-for="block in promptBlocks" :key="block.label" class="prompt-block">
           <template v-if="block.value">
-            <span>{{ block.label }}</span>
-            <pre>{{ block.value }}</pre>
+            <div class="prompt-header">
+              <span>{{ block.label }}</span>
+              <button class="ghost-btn small font-inherit" @click="$emit('view-details', {title: block.label, content: block.value, format: 'code'})">查看完整</button>
+            </div>
           </template>
         </div>
       </article>
@@ -110,7 +115,7 @@
 <script setup>
 import { computed } from 'vue'
 
-import { groupLabel, kindLabel } from '../utils/lotteryDisplay'
+import { groupLabel, kindLabel, shortText } from '../utils/lotteryDisplay'
 
 const props = defineProps({
   strategy: {
@@ -118,6 +123,8 @@ const props = defineProps({
     default: null
   }
 })
+
+defineEmits(['view-details'])
 
 const safeList = (value) => (Array.isArray(value) ? value : [])
 
@@ -165,11 +172,34 @@ const promptBlocks = computed(() => [
 .note-card { padding: 0.85rem 1rem; border-radius: 1rem; background: rgba(15, 118, 110, 0.08); }
 .note-card.subtle { background: rgba(183, 121, 31, 0.08); }
 .meta-block, .prompt-block, .dialogue-list, .issue-list, .numbers-block { display: grid; gap: 0.65rem; }
-.prompt-block pre { margin: 0; padding: 0.95rem; border-radius: 1rem; background: rgba(246, 243, 236, 0.82); white-space: pre-wrap; word-break: break-word; line-height: 1.7; font: inherit; }
+.prompt-header { display: flex; justify-content: space-between; align-items: center; border: 1px dashed rgba(31, 28, 24, 0.2); padding: 0.6rem 0.8rem; border-radius: 0.75rem; background: rgba(255, 255, 255, 0.75); }
+.prompt-header span { font-size: 0.85rem; font-weight: 500; color: #433; }
+.ghost-btn.small { padding: 0.3rem 0.8rem; font-size: 0.8rem; border-radius: 999px; cursor: pointer; border: 1px solid rgba(31, 28, 24, 0.2); background: transparent; }
+.ghost-btn.small:hover { background: rgba(31, 28, 24, 0.05); }
 .hit-badge { border: 1px solid var(--lottery-line-strong, rgba(31, 28, 24, 0.16)); }
 .hit-0 { opacity: 0.42; }
 .hit-1, .hit-2 { background: rgba(255, 255, 255, 0.8); }
 .hit-3, .hit-4, .hit-5, .hit-6, .hit-7, .hit-8, .hit-9, .hit-10 { background: var(--lottery-ink, #1d1b19); color: #fff; }
+
+.text-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.5rem;
+  color: #1a73e8;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(26, 115, 232, 0.4);
+  text-underline-offset: 3px;
+  transition: all 0.2s ease;
+}
+
+.text-link:hover {
+  text-decoration-color: #1a73e8;
+}
+
 @media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .stat-grid { grid-template-columns: 1fr; } }
 </style>

@@ -94,6 +94,14 @@ class FakeLettaClient:
     def send_message(self, agent_id, content):
         if "Answer as the world analyst" in content:
             return "World Analyst: the strongest cluster is still 1/2/3/4/5."
+        if "accepted_purchase_recommendation" in content or "handbook_decider" in agent_id:
+            return (
+                '{"numbers":[1,2,3,4,5],"alternate_numbers":[6,7,8],'
+                '"trusted_strategy_ids":["cold_rule"],"adopted_groups":["data"],'
+                '"accepted_purchase_recommendation":true,'
+                '"rationale":"handbook keeps the cold core and accepts the chair plan.",'
+                '"risk_note":"avoid over-crowded tails"}'
+            )
         if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
             return (
                 '{"plan_style":"balanced","plan_type":"portfolio","play_size":4,'
@@ -185,7 +193,7 @@ def test_world_graph_and_recent_stats_and_world_analyst():
         session_id = result["world_session"]["session_id"]
         graph = service.get_world_graph(session_id)
         stats = service.get_recent_draw_stats(session_id)
-        interview = service.interview_world_agent(session_id, "world_analyst", "Summarize the strongest cluster.")
+        interview = service.interview_world_agent(session_id, "handbook_decider", "Summarize the strongest cluster.")
 
     assert any(node["node_type"] == "agent" for node in graph["nodes"])
     assert any(node["node_type"] == "phase" for node in graph["nodes"])
@@ -194,7 +202,7 @@ def test_world_graph_and_recent_stats_and_world_analyst():
     assert len(stats["numbers"]) == 80
     assert stats["window_size"] == 8
     assert stats["numbers"][0]["number"] == 1
-    assert "World Analyst" in interview["answer"]
+    assert '"numbers":[1,2,3,4,5]' in interview["answer"]
 
 
 def _workspace() -> WorkspaceAssets:

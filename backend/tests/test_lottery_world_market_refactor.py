@@ -448,16 +448,9 @@ def test_kuzu_csv_payload_omits_header(tmp_path):
 
 def test_runtime_projection_flushes_once_per_round(monkeypatch):
     with tempfile.TemporaryDirectory() as temp_dir:
-        service, _, workspace = _service(temp_dir)
+        service, _, _ = _service(temp_dir)
         calls = []
         kuzu_graph_service = service.runtime.kuzu_graph_service
-        kuzu_graph_service.sync_workspace(
-            workspace.knowledge_documents,
-            workspace.chart_profiles,
-            workspace.completed_draws,
-            workspace.pending_draws,
-            force=True,
-        )
         original = kuzu_graph_service.project_runtime_state
 
         def tracked(session):
@@ -486,17 +479,41 @@ def test_runtime_projection_flushes_once_per_round(monkeypatch):
         assert len(calls) == 3
 
 
-def test_runtime_projection_skip_is_explicit_when_kuzu_is_unsynced():
+def test_world_v2_syncs_full_kuzu_workspace_before_visible_history_run(monkeypatch):
     with tempfile.TemporaryDirectory() as temp_dir:
-        service, _, _ = _service(temp_dir)
-        session = service.world_v2_runtime._create_session({}, 5, None, 100)
-        service.runtime.kuzu_graph_service.has_synced_workspace = lambda: False  # type: ignore[method-assign]
+        service, _, workspace = _service(temp_dir)
+        calls = []
+        original = service.kuzu_graph_service.sync_workspace
 
-        service.world_v2_runtime._mark_runtime_projection_dirty(session)
-        service.world_v2_runtime._flush_runtime_projection(session)
+        def tracked(documents, charts, completed, pending, force=False):
+            calls.append(
+                {
+                    "document_count": len(documents),
+                    "completed_count": len(completed),
+                    "pending_periods": [draw.period for draw in pending],
+                    "force": force,
+                }
+            )
+            return original(documents, charts, completed, pending, force)
 
-    assert session["kuzu_runtime_projection_status"] == "skipped"
-    assert session["execution_log"][-1]["code"] == "kuzu_runtime_projection_skipped"
+        monkeypatch.setattr(service.kuzu_graph_service, "sync_workspace", tracked)
+        service.advance_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            agent_dialogue_enabled=False,
+            live_interview_enabled=False,
+            visible_through_period="2026007",
+        )
+
+    assert calls == [
+        {
+            "document_count": len(workspace.knowledge_documents),
+            "completed_count": len(workspace.completed_draws),
+            "pending_periods": [draw.period for draw in workspace.pending_draws],
+            "force": False,
+        }
+    ]
 
 
 def test_agent_result_cache_reuses_same_issue_outputs_across_sessions():

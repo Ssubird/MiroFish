@@ -888,13 +888,6 @@ class LotteryWorldV2Runtime:
             *grounding_documents(assets.knowledge_documents, target_draw),
             *prompt_documents(assets.knowledge_documents),
         ]
-        self.kuzu_graph_service.sync_workspace(
-            graph_docs,
-            assets.chart_profiles,
-            assets.completed_draws,
-            assets.pending_draws,
-            False,
-        )
         return self.kuzu_graph_service.build_prediction_graph(
             history,
             target_draw,
@@ -1753,12 +1746,7 @@ class LotteryWorldV2Runtime:
     def _project_runtime_market(self, session) -> None:
         if self.kuzu_graph_service is None:
             return
-        if not self.kuzu_graph_service.has_synced_workspace():
-            self._record_unsynced_kuzu_projection(session)
-            return
         self.kuzu_graph_service.project_runtime_state(session)
-        session["kuzu_runtime_projection_status"] = "projected"
-        session.pop("_kuzu_projection_skip_reason", None)
 
     def _mark_runtime_projection_dirty(self, session) -> None:
         if self.kuzu_graph_service is None:
@@ -1770,20 +1758,6 @@ class LotteryWorldV2Runtime:
             return
         self._project_runtime_market(session)
         session["_runtime_projection_dirty"] = False
-
-    def _record_unsynced_kuzu_projection(self, session) -> None:
-        reason = "workspace_graph_not_synced"
-        session["kuzu_runtime_projection_status"] = "skipped"
-        if session.get("_kuzu_projection_skip_reason") == reason:
-            return
-        session["_kuzu_projection_skip_reason"] = reason
-        self._log_execution(
-            session,
-            "info",
-            "kuzu_runtime_projection_skipped",
-            "Skipped runtime Kuzu projection because the workspace graph has not been synced yet.",
-            details=["Sync the workspace graph from the lottery graph panel to enable runtime projection."],
-        )
 
     def _opening_events(self, session, period, predictions) -> list[WorldEvent]:
         rows = []

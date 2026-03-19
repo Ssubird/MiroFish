@@ -32,11 +32,14 @@
           :llm-model-loading="llmModelLoading"
           :runtime-readiness="runtimeReadiness"
           :runtime-readiness-loading="runtimeReadinessLoading"
+          :graph-syncing="graphSyncing"
+          :kuzu-graph-status="kuzuGraphStatus"
           :run-message="runMessage"
           :busy="busy"
           :running="running"
           :can-advance="canAdvance"
           @advance="advanceWorld"
+          @sync-kuzu="syncKuzuGraph"
           @load-models="loadModels"
           @probe-model="probeSelectedModel(selectedModelName)"
           @select-all="selectedStrategyIds = availableStrategies.map((item) => item.strategy_id)"
@@ -84,16 +87,27 @@
           @interview="submitInterview"
           @update:agentId="worldInterviewAgentId = $event"
           @update:prompt="worldInterviewPrompt = $event"
+          @view-details="openModal"
         />
       </aside>
     </section>
+
+    <!-- Global Text Modal -->
+    <LotteryTextModal
+      v-model:visible="modalVisible"
+      :title="modalTitle"
+      :content="modalContent"
+      :format="modalFormat"
+    />
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import LotteryRecentDrawBoard from '../components/LotteryRecentDrawBoard.vue'
+import LotteryTextModal from '../components/LotteryTextModal.vue'
 import LotteryWorldControlPanel from '../components/LotteryWorldControlPanel.vue'
 import LotteryWorldGraph from '../components/LotteryWorldGraph.vue'
 import LotteryWorldInspector from '../components/LotteryWorldInspector.vue'
@@ -122,6 +136,8 @@ const {
   llmModelLoading,
   runtimeReadiness,
   runtimeReadinessLoading,
+  graphSyncing,
+  kuzuGraphStatus,
   loadModels,
   activeModelName,
   session,
@@ -137,12 +153,25 @@ const {
   worldInterviewPrompt,
   worldInterviewBusy,
   canAdvance,
+  syncKuzuGraph,
   advanceWorld,
   resetWorld,
   refreshWorld,
   submitInterview,
   probeSelectedModel
 } = useLotteryWorldStudio()
+
+const modalVisible = ref(false)
+const modalTitle = ref('')
+const modalContent = ref('')
+const modalFormat = ref('text')
+
+const openModal = ({ title, content, format = 'text' }) => {
+  modalTitle.value = title || '详情'
+  modalContent.value = content || ''
+  modalFormat.value = format
+  modalVisible.value = true
+}
 
 const toggleStrategy = (strategyId) => {
   if (selectedStrategyIds.value.includes(strategyId)) {

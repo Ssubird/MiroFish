@@ -67,7 +67,10 @@
           <div class="chip-row">
             <span v-for="item in session.active_agent_ids || []" :key="item" class="chip active">{{ item }}</span>
           </div>
-          <p>{{ shortText(sharedMemory.current_issue, 260) || '当前暂无问题摘要。' }}</p>
+          <p>
+            {{ shortText(sharedMemory.current_issue, 260) || '当前暂无问题摘要。' }}
+            <button v-if="(sharedMemory.current_issue || '').length > 260" class="text-link" @click="$emit('view-details', {title: '问题摘要', content: sharedMemory.current_issue})">阅读全文</button>
+          </p>
         </article>
       </div>
 
@@ -82,7 +85,10 @@
           <div class="section-head">
             <h3>{{ item.label }}</h3>
           </div>
-          <p>{{ shortText(item.value, 220) || '当前为空' }}</p>
+          <p>
+            {{ shortText(item.value, 220) || '当前为空' }}
+            <button v-if="(item.value || '').length > 220" class="text-link" @click="$emit('view-details', {title: item.label, content: item.value})">阅读全文</button>
+          </p>
         </article>
       </div>
 
@@ -135,7 +141,10 @@
           <span class="chip">票数 {{ committee.ticket_count || 0 }}</span>
           <span class="chip">成本 {{ committee.total_cost_yuan || 0 }} 元</span>
         </div>
-        <p>{{ shortText(committee.planner?.rationale || committee.rationale, 220) || '当前还在讨论中。' }}</p>
+        <p>
+          {{ shortText(committee.planner?.rationale || committee.rationale, 220) || '当前还在讨论中。' }}
+          <button v-if="(committee.planner?.rationale || committee.rationale || '').length > 220" class="text-link" @click="$emit('view-details', {title: '购买委员会理由', content: committee.planner?.rationale || committee.rationale})">阅读全文</button>
+        </p>
       </article>
 
       <article class="section-card">
@@ -186,7 +195,10 @@
             <div v-if="event.numbers?.length" class="chip-row">
               <span v-for="num in event.numbers" :key="`${event.event_id}-${num}`" class="chip active">{{ num }}</span>
             </div>
-            <p>{{ shortText(event.content, 300) }}</p>
+            <p>
+              {{ shortText(event.content, 300) }}
+              <button v-if="(event.content || '').length > 300" class="text-link" @click="$emit('view-details', {title: `事件详情 - ${event.actor_display_name}`, content: event.content})">阅读全文</button>
+            </p>
           </article>
         </div>
       </article>
@@ -210,7 +222,7 @@ const props = defineProps({
   prompt: { type: String, default: '' }
 })
 
-defineEmits(['refresh', 'reset', 'interview', 'update:agentId', 'update:prompt'])
+defineEmits(['refresh', 'reset', 'interview', 'update:agentId', 'update:prompt', 'view-details'])
 
 const session = computed(() => props.sessionData?.session || null)
 const progress = computed(() => session.value?.progress || {})
@@ -406,5 +418,25 @@ textarea {
 .asset-card p {
   margin: 0;
   color: var(--lottery-muted, #6e675f);
+}
+
+.text-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.5rem;
+  color: #00f0ff;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 240, 255, 0.4);
+  text-underline-offset: 3px;
+  transition: all 0.2s ease;
+}
+
+.text-link:hover {
+  text-decoration-color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
 }
 </style>

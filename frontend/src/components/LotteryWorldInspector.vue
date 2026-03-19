@@ -54,7 +54,10 @@
         <span v-for="num in finalDecision?.numbers || latestPrediction?.ensemble_numbers || []" :key="`f-${num}`" class="chip primary">{{ num }}</span>
         <span v-for="num in finalDecision?.alternate_numbers || latestPrediction?.alternate_numbers || []" :key="`fa-${num}`" class="chip alt">{{ num }}</span>
       </div>
-      <p>{{ shortText(finalDecision?.rationale, 240) || '本轮还没有形成官方终判。' }}</p>
+      <p>
+        {{ shortText(finalDecision?.rationale, 240) || '本轮还没有形成官方终判。' }}
+        <button v-if="(finalDecision?.rationale || '').length > 240" class="text-link" @click="$emit('view-details', {title: '官方终判理由', content: finalDecision.rationale})">阅读全文</button>
+      </p>
       <p class="muted">{{ shortText(finalDecision?.risk_note, 180) }}</p>
     </article>
 
@@ -69,7 +72,10 @@
           <span class="chip">{{ latestPurchasePlan?.ticket_count || 0 }} 注</span>
           <span class="chip">{{ latestPurchasePlan?.total_cost_yuan || budgetYuan || 0 }} 元</span>
         </div>
-        <p>{{ shortText(latestPurchasePlan?.rationale || latestPurchasePlan?.chosen_edge, 180) || '购买建议尚未生成。' }}</p>
+        <p>
+          {{ shortText(latestPurchasePlan?.rationale || latestPurchasePlan?.chosen_edge, 180) || '购买建议尚未生成。' }}
+          <button v-if="(latestPurchasePlan?.rationale || latestPurchasePlan?.chosen_edge || '').length > 180" class="text-link" @click="$emit('view-details', {title: '购买建议理由', content: latestPurchasePlan.rationale || latestPurchasePlan.chosen_edge})">阅读全文</button>
+        </p>
       </article>
 
       <article class="section-card compact">
@@ -82,7 +88,10 @@
           <span class="chip">收益 {{ latestReview?.purchase_profit ?? '-' }}</span>
           <span class="chip">ROI {{ latestReview?.purchase_roi ?? '-' }}</span>
         </div>
-        <p>{{ shortText(latestReview?.summary, 180) || '当前还没有复盘结果。' }}</p>
+        <p>
+          {{ shortText(latestReview?.summary, 180) || '当前还没有复盘结果。' }}
+          <button v-if="(latestReview?.summary || '').length > 180" class="text-link" @click="$emit('view-details', {title: '最新复盘', content: latestReview.summary})">阅读全文</button>
+        </p>
       </article>
     </div>
 
@@ -111,12 +120,18 @@
         <div v-for="item in marketPosts" :key="item.event_id || `social-${item.actor_id}`" class="event-item">
           <strong>{{ item.actor_display_name || item.actor_id }}</strong>
           <span>市场发言</span>
-          <p>{{ shortText(item.content, 160) }}</p>
+          <p>
+            {{ shortText(item.content, 160) }}
+            <button v-if="(item.content || '').length > 160" class="text-link" @click="$emit('view-details', {title: `市场发言 - ${item.actor_display_name || item.actor_id}`, content: item.content})">阅读全文</button>
+          </p>
         </div>
         <div v-for="item in judgeBoards" :key="item.event_id || `judge-${item.actor_id}`" class="event-item">
           <strong>{{ item.actor_display_name || item.actor_id }}</strong>
           <span>裁判意见</span>
-          <p>{{ shortText(item.content, 160) }}</p>
+          <p>
+            {{ shortText(item.content, 160) }}
+            <button v-if="(item.content || '').length > 160" class="text-link" @click="$emit('view-details', {title: `裁判意见 - ${item.actor_display_name || item.actor_id}`, content: item.content})">阅读全文</button>
+          </p>
         </div>
       </div>
     </article>
@@ -177,7 +192,10 @@
           <span class="chip">{{ nodeTypeLabel(selectedGraphNode.node_type) }}</span>
           <span class="chip">{{ nodeScope(selectedGraphNode) }}</span>
         </div>
-        <p>{{ selectedGraphNode.summary || selectedGraphNode.comment || '-' }}</p>
+        <p>
+          {{ shortText(selectedGraphNode.summary || selectedGraphNode.comment, 200) || '-' }}
+          <button v-if="(selectedGraphNode.summary || selectedGraphNode.comment || '').length > 200" class="text-link" @click="$emit('view-details', {title: '节点辅助详情', content: selectedGraphNode.summary || selectedGraphNode.comment})">阅读全文</button>
+        </p>
       </template>
     </article>
 
@@ -244,7 +262,10 @@
             <span>{{ phaseLabel(entry.phase) }} / {{ formatLogTime(entry.created_at) }}</span>
           </div>
           <div class="log-code">{{ entry.code || '-' }}</div>
-          <p>{{ entry.message || '-' }}</p>
+          <p>
+            {{ shortText(entry.message, 140) || '-' }}
+            <button v-if="(entry.message || '').length > 140" class="text-link" @click="$emit('view-details', {title: '执行日志详情', content: entry.message})">阅读全文</button>
+          </p>
         </div>
       </div>
     </article>
@@ -258,7 +279,10 @@
         <div v-for="event in latestEvents" :key="event.event_id" class="event-item">
           <strong>{{ event.actor_display_name }}</strong>
           <span>{{ eventLabel(event.event_type) }} / {{ phaseLabel(event.phase) }}</span>
-          <p>{{ shortText(event.content, 130) }}</p>
+          <p>
+            {{ shortText(event.content, 130) }}
+            <button v-if="(event.content || '').length > 130" class="text-link" @click="$emit('view-details', {title: `事件详情 - ${event.actor_display_name}`, content: event.content})">阅读全文</button>
+          </p>
         </div>
       </div>
     </article>
@@ -294,7 +318,7 @@ const props = defineProps({
   prompt: { type: String, default: '' }
 })
 
-defineEmits(['refresh', 'reset', 'interview', 'update:agentId', 'update:prompt'])
+defineEmits(['refresh', 'reset', 'interview', 'update:agentId', 'update:prompt', 'view-details'])
 
 const session = computed(() => props.sessionData?.session || null)
 const latestEvents = computed(() => (props.timeline?.items || []).slice(0, 8))
@@ -548,5 +572,25 @@ textarea {
   .stack-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.text-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.5rem;
+  color: #00f0ff;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 240, 255, 0.4);
+  text-underline-offset: 3px;
+  transition: all 0.2s ease;
+}
+
+.text-link:hover {
+  text-decoration-color: #00f0ff;
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
 }
 </style>

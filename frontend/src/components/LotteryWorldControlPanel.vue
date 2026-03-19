@@ -17,6 +17,24 @@
       :loading="runtimeReadinessLoading"
     />
 
+    <div class="field">
+      <div class="field-head">
+        <span>Kuzu 图谱</span>
+        <button type="button" class="ghost-btn" :disabled="graphSyncing" @click="$emit('sync-kuzu')">
+          {{ graphSyncing ? '同步中...' : '同步 Kuzu' }}
+        </button>
+      </div>
+      <p class="muted">
+        状态：{{ kuzuStateLabel }} / {{ kuzuFreshnessLabel }}
+      </p>
+      <p class="muted">
+        节点 / 关系：{{ `${kuzuGraphStatus?.node_count ?? 0} / ${kuzuGraphStatus?.edge_count ?? 0}` }}
+      </p>
+      <p class="muted">
+        `world_v2_market` 会在推进前确保 Kuzu 参与本轮运行。
+      </p>
+    </div>
+
     <p v-if="runMessage" class="run-message">{{ runMessage }}</p>
 
     <div class="summary-grid">
@@ -160,6 +178,8 @@ const props = defineProps({
   llmModelLoading: { type: Boolean, default: false },
   runtimeReadiness: { type: Object, default: null },
   runtimeReadinessLoading: { type: Boolean, default: false },
+  graphSyncing: { type: Boolean, default: false },
+  kuzuGraphStatus: { type: Object, default: () => ({}) },
   runMessage: { type: String, default: '' },
   busy: { type: Boolean, default: false },
   running: { type: Boolean, default: false },
@@ -170,6 +190,7 @@ const props = defineProps({
 
 defineEmits([
   'advance',
+  'sync-kuzu',
   'probe-model',
   'load-models',
   'select-all',
@@ -204,6 +225,14 @@ const modelOptions = computed(() => {
 
   return options
 })
+
+const kuzuStateLabel = computed(() => (
+  props.kuzuGraphStatus?.available ? '已同步' : '未同步'
+))
+
+const kuzuFreshnessLabel = computed(() => (
+  props.kuzuGraphStatus?.is_stale ? '需要刷新' : '最新'
+))
 </script>
 
 <style scoped>

@@ -60,10 +60,6 @@ class KuzuGraphService:
         available = bool(state and Path(state.db_path).exists())
         return {"configured": True, "available": available, "graph_id": state.graph_id if state else GRAPH_ID, "db_path": state.db_path if state else str(self.db_root), "synced_at": state.synced_at if state else None, "node_count": state.node_count if state else 0, "edge_count": state.edge_count if state else 0, "document_count": state.document_count if state else 0, "chart_count": state.chart_count if state else 0, "draw_count": state.draw_count if state else 0, "is_stale": bool(state and workspace_digest and state.workspace_digest != workspace_digest), "workspace_digest": workspace_digest, "stored_digest": state.workspace_digest if state else None}
 
-    def has_synced_workspace(self) -> bool:
-        state = self.state_store.load()
-        return bool(state and Path(state.db_path).exists())
-
     def sync_workspace(self, documents, charts, completed, pending, force: bool = False) -> dict[str, object]:
         digest = self.workspace_digest(documents, charts, completed, pending)
         current = self.state_store.load()
