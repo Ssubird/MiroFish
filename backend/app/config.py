@@ -11,11 +11,11 @@ APP_ROOT = os.path.dirname(__file__)
 PROJECT_ROOT = os.path.abspath(os.path.join(APP_ROOT, "../.."))
 PROJECT_ROOT_ENV = os.path.join(PROJECT_ROOT, ".env")
 
-def reload_project_env() -> None:
+def reload_project_env(override: bool = False) -> None:
     if os.path.exists(PROJECT_ROOT_ENV):
-        load_dotenv(PROJECT_ROOT_ENV, override=True)
+        load_dotenv(PROJECT_ROOT_ENV, override=override)
         return
-    load_dotenv(override=True)
+    load_dotenv(override=override)
 
 
 reload_project_env()
@@ -58,6 +58,12 @@ class Config:
     LOTTERY_DATA_ROOT = _project_path(
         os.environ.get("LOTTERY_DATA_ROOT", os.path.join(PROJECT_ROOT, "ziweidoushu")),
     )
+    AGENT_FABRIC_ROOT = _project_path(
+        os.environ.get("AGENT_FABRIC_ROOT", os.path.join(LOTTERY_DATA_ROOT, "agent_fabric")),
+    )
+    AGENT_FABRIC_GENERATED_ROOT = _project_path(
+        os.environ.get("AGENT_FABRIC_GENERATED_ROOT", os.path.join(LOTTERY_DATA_ROOT, "generated")),
+    )
     KUZU_GRAPH_ROOT = _project_path(
         os.environ.get("KUZU_GRAPH_ROOT", os.path.join(LOTTERY_DATA_ROOT, ".kuzu_graph")),
     )
@@ -65,6 +71,10 @@ class Config:
         os.environ.get("LOTTERY_WORLD_STATE_ROOT", os.path.join(LOTTERY_DATA_ROOT, ".world_state")),
     )
     LOTTERY_RUNTIME_MODE = os.environ.get("LOTTERY_RUNTIME_MODE", "legacy")
+    EXECUTION_CONFIG_PATH = os.environ.get(
+        "EXECUTION_CONFIG_PATH",
+        os.path.join(os.path.dirname(__file__), "services", "lottery", "execution_config.yaml"),
+    )
 
     OASIS_DEFAULT_MAX_ROUNDS = int(os.environ.get("OASIS_DEFAULT_MAX_ROUNDS", "10"))
     OASIS_SIMULATION_DATA_DIR = os.path.join(

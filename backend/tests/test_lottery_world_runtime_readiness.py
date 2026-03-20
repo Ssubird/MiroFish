@@ -160,6 +160,7 @@ def test_runtime_readiness_allows_explicit_no_mcp_mode(monkeypatch):
 
 def test_runtime_readiness_prefers_letta_when_explicit_no_mcp_has_letta(monkeypatch):
     monkeypatch.setenv("LOTTERY_WORLD_ALLOW_NO_MCP", "true")
+    monkeypatch.setenv("LOTTERY_WORLD_NO_MCP_BACKEND", "auto")
     monkeypatch.setattr(
         "app.services.lottery.world_runtime_readiness._explicit_letta_base_url",
         lambda: "http://127.0.0.1:8283/v1",
@@ -179,6 +180,22 @@ def test_runtime_readiness_prefers_letta_when_explicit_no_mcp_has_letta(monkeypa
     assert readiness["runtime_backend"] == "letta_no_mcp"
     assert readiness["mcp"]["required"] is False
     assert readiness["letta"]["configured"] is True
+
+
+def test_runtime_readiness_can_force_local_backend_with_letta_configured(monkeypatch):
+    monkeypatch.setenv("LOTTERY_WORLD_ALLOW_NO_MCP", "true")
+    monkeypatch.setenv("LOTTERY_WORLD_NO_MCP_BACKEND", "local")
+    monkeypatch.setattr(
+        "app.services.lottery.world_runtime_readiness._explicit_letta_base_url",
+        lambda: "http://127.0.0.1:8283/v1",
+    )
+
+    readiness = runtime_readiness(WORLD_V2_MARKET_RUNTIME_MODE)
+
+    assert readiness["ready"] is True
+    assert readiness["runtime_backend"] == "local_no_mcp"
+    assert readiness["letta"]["configured"] is False
+    assert readiness["mcp"]["required"] is False
 
 
 def test_runtime_readiness_blocks_local_no_mcp_without_llm(monkeypatch):

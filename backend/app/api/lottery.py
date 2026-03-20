@@ -80,6 +80,24 @@ def get_lottery_models():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@lottery_bp.route("/execution/registry", methods=["GET"])
+def get_lottery_execution_registry():
+    try:
+        return jsonify({"success": True, "data": service.get_execution_registry()})
+    except Exception as exc:
+        logger.exception("Failed to load execution registry")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@lottery_bp.route("/agent-fabric/registry", methods=["GET"])
+def get_lottery_agent_fabric_registry():
+    try:
+        return jsonify({"success": True, "data": service.get_agent_fabric_registry()})
+    except Exception as exc:
+        logger.exception("Failed to load agent fabric registry")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @lottery_bp.route("/models/probe", methods=["POST"])
 def probe_lottery_model():
     payload = request.get_json(silent=True) or {}
@@ -99,8 +117,8 @@ def run_lottery_backtest():
     strategy_ids = payload.get("strategy_ids")
     if strategy_ids is not None and not isinstance(strategy_ids, list):
         return jsonify({"success": False, "error": "strategy_ids must be an array"}), 400
-    params = _backtest_params(payload)
     try:
+        params = _backtest_params(payload)
         logger.info(
             "Start lottery backtest: evaluation_size=%s, pick_size=%s, llm_request_delay_ms=%s, llm_model_name=%s, llm_retry_count=%s, llm_retry_backoff_ms=%s, llm_parallelism=%s, issue_parallelism=%s, agent_dialogue_enabled=%s, agent_dialogue_rounds=%s, graph_mode=%s, zep_graph_id=%s, runtime_mode=%s, warmup_size=%s, live_interview_enabled=%s, strategy_ids=%s",
             params["evaluation_size"],
@@ -151,9 +169,9 @@ def advance_lottery_world():
     strategy_ids = payload.get("strategy_ids")
     if strategy_ids is not None and not isinstance(strategy_ids, list):
         return jsonify({"success": False, "error": "strategy_ids must be an array"}), 400
-    params = _backtest_params(payload)
-    params["runtime_mode"] = WORLD_V2_MARKET_RUNTIME_MODE
     try:
+        params = _backtest_params(payload)
+        params["runtime_mode"] = WORLD_V2_MARKET_RUNTIME_MODE
         service.ensure_world_runtime_ready(params["runtime_mode"])
         data = world_runs.start(service, strategy_ids, params)
         return jsonify({"success": True, "data": data}), 202
@@ -283,6 +301,7 @@ def _backtest_params(payload: dict[str, object]) -> dict[str, object]:
         "budget_yuan": int(payload.get("budget_yuan", DEFAULT_BUDGET_YUAN)),
         "session_id": str(payload.get("session_id", "")).strip() or None,
         "visible_through_period": _optional_string(payload.get("visible_through_period")),
+        "execution_overrides": _execution_overrides(payload.get("execution_overrides")),
     }
 
 
@@ -301,6 +320,22 @@ def _optional_string(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _execution_overrides(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("execution_overrides must be an object")
+    payload = {}
+    for key in ("group_overrides", "agent_overrides"):
+        raw = value.get(key)
+        if raw is None:
+            continue
+        if not isinstance(raw, dict):
+            raise ValueError(f"execution_overrides.{key} must be an object")
+        payload[key] = {str(left).strip(): str(right).strip() for left, right in raw.items() if str(left).strip() and str(right).strip()}
+    return payload
 
 
 def _preflight_error_response(exc: WorldRuntimePreflightError):

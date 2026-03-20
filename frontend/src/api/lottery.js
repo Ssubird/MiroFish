@@ -16,6 +16,10 @@ export const getLotteryModels = () => {
   return service.get('/api/lottery/models', { timeout: LOTTERY_MODELS_TIMEOUT_MS })
 }
 
+export const getLotteryExecutionRegistry = () => {
+  return service.get('/api/lottery/execution/registry')
+}
+
 export const probeLotteryModel = (modelName) => {
   return service.post(
     '/api/lottery/models/probe',

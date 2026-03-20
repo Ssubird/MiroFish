@@ -1,27 +1,28 @@
-# World V2 Design
+# World V2.5 Design
 
 ## Goal
 
-Keep `world_v2_market`, but make the chain readable, stable, and fast enough for daily use.
+Keep `world_v2_market`, but upgrade it into a clearer execution market:
 
-Core principles:
+- explicit issue progression
+- explicit per-agent execution binding
+- canonical signal boards
+- handbook-aligned anti-crowding logic
+- Happy8-first game kernel boundary
 
-- one visible-through period at a time
-- settle before the next prediction
-- generator stage isolated by group
-- market stage aggregated in one place
-- official final decision separated from purchase ROI validation
+## Runtime Entry
 
-## Public Interaction
+Public endpoints:
 
-Public entry:
-
+- `POST /api/lottery/world/prepare`
 - `POST /api/lottery/world/advance`
+- `GET /api/lottery/execution/registry`
 
-Inputs:
+Core inputs:
 
 - `visible_through_period`
 - `agent_dialogue_rounds`
+- `execution_overrides`
 
 Removed:
 
@@ -30,16 +31,18 @@ Removed:
 
 ## Visible-Through Model
 
-`visible_through_period` means the last issue agents are allowed to see.
+`visible_through_period` means the last issue agents may see.
 
 Example:
 
 - visible through `2026063`
-  - generators and market roles can only read data up to `2026063`
+  - visible data ends at `2026063`
   - the runtime predicts `2026064`
 - visible through `2026064`
-  - if `2026064` has actual draw data, the runtime settles and postmortems `2026064`
+  - if `2026064` draw data already exists, the runtime settles and postmortems `2026064`
   - then it predicts `2026065`
+
+Repeated clicks on the same visible-through issue with unchanged draw data do not create duplicate predictions or duplicate settlement records.
 
 ## Phase Flow
 
@@ -59,16 +62,15 @@ Settlement cycle:
 
 ## Generator Isolation
 
-The generator stage is intentionally split by group.
+Generation is isolated by group.
 
 Rules:
 
-- data group generates its own boards
-- metaphysics group generates its own boards
-- hybrid group generates its own boards
-- no group reads another group's current-round outputs during `generator_opening`
+- data, metaphysics, and hybrid groups generate independently
+- groups do not read each other's same-round outputs during `generator_opening`
+- cross-group aggregation begins only in the market stage
 
-Current generator groups:
+Current groups:
 
 - `data`
   - `cold_50`
@@ -81,16 +83,9 @@ Current generator groups:
 - `hybrid`
   - `hybrid_fused_board`
 
-This is isolation, not blindness.
+## Market Roles
 
-Meaning:
-
-- generation phase stays separated
-- social / judge / purchase / final decider are where cross-group aggregation happens
-
-## Market Aggregation
-
-The market stage is the only place where boards converge.
+Boards converge only in the market stage.
 
 Roles:
 
@@ -102,10 +97,94 @@ Roles:
 
 Responsibilities:
 
-- social: amplify or warn about current boards
-- judge: re-rank and compress market consensus
-- purchase_chair: produce executable purchase recommendation
-- handbook_decider: publish the official final prediction
+- social roles amplify, question, and warn about signal boards
+- judge re-ranks and compresses the market picture
+- purchase chair produces executable purchase structures
+- handbook decider publishes the official final decision
+
+## Execution Fabric
+
+Execution binding is explicit. There is no adaptive provider or model selection.
+
+Persistent defaults come from `execution_config.yaml`:
+
+- `providers`
+- `models`
+- `profiles`
+- `role_defaults`
+- `group_overrides`
+- `agent_overrides`
+- `decision_weights`
+- `happy8_feature_profile`
+
+Binding precedence:
+
+1. role default
+2. group override
+3. agent override
+4. session `execution_overrides`
+
+Rules:
+
+- the UI selects `profile_id`, not raw provider/model text
+- the UI only writes session-scoped overrides
+- session overrides never rewrite YAML
+- resolved bindings are stored in session payloads, reports, and execution logs
+
+Current runtime scope:
+
+- Local/no-MCP execution enforces per-agent provider/model binding
+- Letta currently carries aligned binding metadata only
+- Letta does not yet execute different providers per agent in this phase
+
+## Signal Market Surface
+
+Canonical market truth is `SignalBoard`.
+
+Each board may include:
+
+- `number_scores`
+- `structure_scores`
+- `play_size_scores`
+- `crowding_penalties`
+- `payout_surrogates`
+- `exclusions`
+- `evidence_refs`
+- `confidence`
+- `rationale`
+
+Compatibility rule:
+
+- old generators may still emit `StrategyPrediction`
+- runtime adapts generator output into `SignalBoard` before the market stage
+- reports and payloads should prefer `signal_boards`
+
+## Handbook-Aligned Scoring
+
+The system now separates draw signals from crowding and payout concerns.
+
+Main scoring surfaces:
+
+- `draw_signal`
+- `anti_crowding`
+- `payout_surrogate`
+- `pattern_risk`
+
+Anti-crowding penalties include:
+
+- arithmetic progression risk
+- symmetry risk
+- geometric pattern risk
+- prior-winning-copy risk
+- shifted-winning-copy risk
+- hot/cold narrative risk
+- omission-chasing risk
+- beautiful-math-pattern risk
+
+Interpretation rule:
+
+- AC, sum, edge counts, and cluster counts are treated as filters or payout surrogates
+- they are not described as oracle-like predictors of the next draw
 
 ## Shared Memory Model
 
@@ -127,24 +206,32 @@ Current shared blocks:
 
 Read/write intent:
 
-- dynamic current-issue state goes into shared blocks
-- long handbook or rules content stays in prompt assets / passages
-- phase transitions, settlement, and reports stay inside `world_v2_runtime`
+- current-issue dynamic state goes into shared blocks
+- long handbook text stays in prompt assets
+- phase transitions, settlement, reports, and issue truth stay inside `world_v2_runtime`
 
-## Social Layer Limits
+## Game Kernel
 
-The social roster stays small by design.
+Happy8 now runs behind a game-kernel boundary.
 
-Rules:
+Current layout:
 
-- size stays within `1..6`
-- each social role must have a distinct `social_mode`
-- avoid many near-duplicate voices
+- `games/base.py`
+- `games/happy8/definition.py`
+- `games/happy8/features.py`
 
-Current social roles:
+Current `GameDefinition` responsibilities:
 
-- `social_consensus_feed`
-- `social_risk_feed`
+- validate selection
+- expand plan
+- price plan
+- settle plan
+- extract features
+
+Runtime rule:
+
+- `world_v2_runtime` depends on `game_id + play_mode + GameDefinition`
+- Happy8 constants, pricing rules, and settlement rules stay inside the game layer
 
 ## Kuzu Role
 
@@ -154,13 +241,13 @@ Current use:
 
 - workspace graph sync for prediction context
 - runtime market projection at round close
-- issue / influencer / faction / crowding analysis
+- issue, influencer, faction, crowding, and similarity analysis
 
 Current performance rules:
 
 - runtime projection is dirty-flagged
-- do not re-project after every phase
-- flush projection at prediction close or settlement close
+- projection is not re-run after every phase
+- projection flushes at prediction close or settlement close
 - CSV import omits headers to avoid polluted graph rows
 
 ## Result Cache
@@ -206,11 +293,12 @@ Per-issue report sections are fixed:
 
 The inspector is primary. The graph is secondary.
 
-The user should be able to see, without guessing:
+The user should be able to see:
 
 - current visible-through issue
 - current predicted issue
 - current phase and actor
+- current execution bindings by group and agent
 - generator boards
 - market discussion
 - purchase recommendation

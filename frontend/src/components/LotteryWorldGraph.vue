@@ -17,7 +17,17 @@
     </div>
 
     <div v-if="!layout.nodes.length" class="empty-state">
-      当前还没有可视化节点，先推进一轮预测。
+      <svg class="empty-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.3" />
+        <circle cx="32" cy="18" r="4" fill="currentColor" opacity="0.25" />
+        <circle cx="18" cy="40" r="3.5" fill="currentColor" opacity="0.2" />
+        <circle cx="46" cy="40" r="3.5" fill="currentColor" opacity="0.2" />
+        <line x1="32" y1="22" x2="20" y2="37" stroke="currentColor" stroke-width="1" opacity="0.15" />
+        <line x1="32" y1="22" x2="44" y2="37" stroke="currentColor" stroke-width="1" opacity="0.15" />
+        <line x1="21" y1="40" x2="43" y2="40" stroke="currentColor" stroke-width="1" opacity="0.1" />
+      </svg>
+      <p class="empty-title">图谱尚未生成</p>
+      <p class="empty-hint">推进一轮预测后，世界关系图将在此可视化</p>
     </div>
 
     <svg v-else class="graph-canvas" :viewBox="`0 0 ${layout.width} ${layout.height}`" role="img">
@@ -25,6 +35,13 @@
         <marker id="graph-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
           <path d="M0,0 L7,3.5 L0,7 z" fill="rgba(255, 255, 255, 0.45)" />
         </marker>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
       </defs>
 
       <line
@@ -175,11 +192,14 @@ function evenly(items, start, end) {
 <style scoped>
 .graph-shell {
   display: grid;
-  gap: 1rem;
-  padding: 1.25rem;
+  gap: 0.85rem;
+  padding: 1.15rem;
   border-radius: 1.5rem;
-  border: 1px solid rgba(0, 240, 255, 0.15);
-  background: rgba(11, 12, 16, 0.6);
+  border: 1px solid rgba(0, 240, 255, 0.12);
+  background: rgba(11, 12, 16, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4), inset 0 0 16px rgba(0, 240, 255, 0.04);
   color: #e0e6ed;
 }
 
@@ -196,60 +216,99 @@ function evenly(items, start, end) {
 .graph-legend {
   justify-content: flex-start;
   color: #8b9bb4;
+  font-size: 0.85rem;
 }
 
 .legend-dot {
   display: inline-block;
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 0.65rem;
+  height: 0.65rem;
   border-radius: 999px;
-  margin-right: 0.35rem;
+  margin-right: 0.3rem;
 }
 
-.legend-dot.agent {
-  background: #5dd0ff;
-}
+.legend-dot.agent { background: #5dd0ff; box-shadow: 0 0 6px rgba(93, 208, 255, 0.4); }
+.legend-dot.phase { background: #ffc14d; box-shadow: 0 0 6px rgba(255, 193, 77, 0.4); }
 
-.legend-dot.phase {
-  background: #ffc14d;
-}
-
+/* ── Empty State ── */
 .empty-state {
-  padding: 1rem;
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.04);
-  color: #8b9bb4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  text-align: center;
 }
 
+.empty-icon {
+  width: 5rem;
+  height: 5rem;
+  color: #5dd0ff;
+  margin-bottom: 1.25rem;
+  animation: subtleBreathe 3s ease-in-out infinite;
+}
+
+@keyframes subtleBreathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%      { opacity: 0.8; transform: scale(1.05); }
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #c8d6e5;
+}
+
+.empty-hint {
+  margin: 0.35rem 0 0;
+  color: #6b7c8e;
+  font-size: 0.85rem;
+}
+
+/* ── Canvas ── */
 .graph-canvas {
   width: 100%;
-  min-height: 32rem;
+  min-height: 28rem;
 }
 
 .graph-edge {
-  stroke: rgba(255, 255, 255, 0.18);
+  stroke: rgba(255, 255, 255, 0.15);
   stroke-width: 1.5;
 }
 
 .graph-node {
   cursor: pointer;
+  transition: opacity 0.2s;
 }
 
 .node-core {
-  fill: rgba(0, 240, 255, 0.18);
-  stroke: rgba(0, 240, 255, 0.35);
+  fill: rgba(0, 240, 255, 0.15);
+  stroke: rgba(0, 240, 255, 0.3);
   stroke-width: 2;
+  transition: all 0.25s ease;
+}
+
+.graph-node:hover .node-core {
+  fill: rgba(0, 240, 255, 0.25);
+  stroke: rgba(0, 240, 255, 0.6);
 }
 
 .graph-node.phase .node-core {
-  fill: rgba(255, 193, 77, 0.18);
-  stroke: rgba(255, 193, 77, 0.45);
+  fill: rgba(255, 193, 77, 0.15);
+  stroke: rgba(255, 193, 77, 0.4);
+}
+
+.graph-node.phase:hover .node-core {
+  fill: rgba(255, 193, 77, 0.25);
+  stroke: rgba(255, 193, 77, 0.7);
 }
 
 .graph-node.selected .node-core,
 .graph-node.active .node-core {
   stroke: #ffffff;
   stroke-width: 2.5;
+  filter: url(#glow);
 }
 
 .node-title,
@@ -262,20 +321,23 @@ function evenly(items, start, end) {
 
 .node-title {
   fill: #fff;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
 .node-meta {
   fill: #8b9bb4;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
 }
 
-.eyebrow {
-  color: #8b9bb4;
-}
+.eyebrow { color: #8b9bb4; }
 
 .graph-header h2 {
   color: #fff;
-  font-size: 1.4rem;
+  font-size: 1.3rem;
+}
+
+.graph-metrics span {
+  font-size: 0.82rem;
+  color: #6b7c8e;
 }
 </style>

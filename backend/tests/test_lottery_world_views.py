@@ -102,7 +102,7 @@ class FakeLettaClient:
                 '"rationale":"handbook keeps the cold core and accepts the chair plan.",'
                 '"risk_note":"avoid over-crowded tails"}'
             )
-        if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
+        if "Choose the best reference plan for the market" in content or "purchase_chair" in agent_id:
             return (
                 '{"plan_style":"balanced","plan_type":"portfolio","play_size":4,'
                 '"play_size_review":{"3":"low edge","4":"best","5":"too concentrated","6":"too loose"},'
@@ -111,7 +111,7 @@ class FakeLettaClient:
                 '"primary_ticket":[1,2,3,4],"core_numbers":[1,2,3],"hedge_numbers":[4,5],'
                 '"avoid_numbers":[10],"trusted_strategy_ids":["cold_rule"],"comment":"chair closes","rationale":"chair closes"}'
             )
-        if "Your persona budget:" in content:
+        if "Return one executable purchase proposal" in content:
             return (
                 '{"plan_style":"market","plan_type":"tickets","play_size":4,'
                 '"play_size_review":{"3":"thin","4":"best","5":"too tight","6":"too diffuse"},'
@@ -193,7 +193,7 @@ def test_world_graph_and_recent_stats_and_world_analyst():
         session_id = result["world_session"]["session_id"]
         graph = service.get_world_graph(session_id)
         stats = service.get_recent_draw_stats(session_id)
-        interview = service.interview_world_agent(session_id, "handbook_decider", "Summarize the strongest cluster.")
+        interview = service.interview_world_agent(session_id, "purchase_chair", "Summarize the strongest cluster.")
 
     assert any(node["node_type"] == "agent" for node in graph["nodes"])
     assert any(node["node_type"] == "phase" for node in graph["nodes"])
@@ -202,12 +202,20 @@ def test_world_graph_and_recent_stats_and_world_analyst():
     assert len(stats["numbers"]) == 80
     assert stats["window_size"] == 8
     assert stats["numbers"][0]["number"] == 1
-    assert '"numbers":[1,2,3,4,5]' in interview["answer"]
+    assert '"primary_ticket":[1,2,3,4]' in interview["answer"]
 
 
 def _workspace() -> WorkspaceAssets:
     docs = (
         KnowledgeDocument("prompt.md", "prompt", "knowledge/prompts/prompt.md", 20, "Use Ziwei prompt.", ("prompt",)),
+        KnowledgeDocument(
+            "lottery_handbook_deep_notes.md",
+            "prompt",
+            "knowledge/prompts/lottery_handbook_deep_notes.md",
+            40,
+            "Handbook doctrine: avoid crowding and preserve executable choices.",
+            ("handbook", "crowding"),
+        ),
         KnowledgeDocument("basis.md", "knowledge", "knowledge/learn/basis.md", 20, "冷号与命盘都重要。", ("冷号", "命盘")),
         KnowledgeDocument("prediction_report.md", "report", "reports/prediction_report.md", 20, "report evidence", ("report",)),
     )

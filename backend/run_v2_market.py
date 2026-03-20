@@ -21,7 +21,9 @@ def main():
             issue_parallelism=1
         )
         print("Simulation completed successfully!")
-        print("Latest Prediction:", result.get("latest_prediction", {}))
+        pending = dict(result.get("pending_prediction") or {})
+        print("Pending Prediction:", pending)
+        print("Final Decision:", pending.get("final_decision", {}))
     except Exception as e:
         print(f"Simulation failed: {e}")
         sys.exit(1)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import inspect
 import os
 
 from ...config import Config, reload_project_env
@@ -32,6 +33,8 @@ from .constants import (
     WORLD_V1_RUNTIME_MODE,
     WORLD_WARMUP_ISSUES,
 )
+from .agent_fabric_registry import AgentFabricRegistry
+from .agent_fabric_snapshot import write_agent_fabric_snapshot
 from .graph_context import DomainGraphService
 from .kuzu_graph import KuzuGraphService
 from .paths import DRAW_DATA_FILE, LOTTERY_ROOT
@@ -51,9 +54,15 @@ from .serializers import (
 )
 from .deliberation import DialogueCoordinator
 from .document_filters import grounding_documents, prompt_documents
+from .execution_registry import ExecutionRegistry
 from .letta_no_mcp_client import LettaNoMcpClient
 from .local_world_client import LocalWorldClient
 from .world_runtime import LotteryWorldRuntime
+from .world_runtime_backend import (
+    NO_MCP_BACKEND_LETTA,
+    NO_MCP_BACKEND_LOCAL,
+    world_v2_no_mcp_backend,
+)
 from .world_runtime_readiness import ensure_runtime_ready, runtime_readiness
 from .world_runtime_flags import allow_world_v2_without_mcp
 from .world_v2_runtime import LotteryWorldV2Runtime
@@ -87,14 +96,16 @@ class LotteryResearchService:
             runtime.graph_service,
             kuzu_graph_service=runtime.kuzu_graph_service,
         )
+        self.execution_registry = ExecutionRegistry()
         world_v2_client = getattr(self.world_runtime, "letta_client", None)
         if world_v2_client is None:
-            world_v2_client = _no_mcp_world_v2_client()
+            world_v2_client = _world_v2_no_mcp_client(self.execution_registry)
         self.world_v2_runtime = LotteryWorldV2Runtime(
             runtime.graph_service,
             store=self.world_runtime.store,
             letta_client=world_v2_client,
             kuzu_graph_service=runtime.kuzu_graph_service,
+            execution_registry=self.execution_registry,
         )
         self.kuzu_graph_service = runtime.kuzu_graph_service
         self.zep_graph_service = runtime.zep_graph_service
@@ -138,6 +149,21 @@ class LotteryResearchService:
             "knowledge_documents": [serialize_document(item) for item in assets.knowledge_documents],
             "chart_profiles": [serialize_chart(item) for item in assets.chart_profiles],
             "available_strategies": [serialize_strategy(item) for item in assets.strategies.values()],
+        }
+
+    def get_execution_registry(self) -> dict[str, object]:
+        return self.execution_registry.export_catalog()
+
+    def get_agent_fabric_registry(self) -> dict[str, object]:
+        assets = self.runtime.load_workspace()
+        registry = AgentFabricRegistry(execution_registry=self.execution_registry)
+        snapshot = write_agent_fabric_snapshot(registry, assets, self.execution_registry)
+        return {
+            "registry": snapshot["payload"],
+            "snapshot_artifacts": {
+                "json_path": snapshot["json_path"],
+                "markdown_path": snapshot["markdown_path"],
+            },
         }
 
     def sync_zep_graph(self, force: bool = False) -> dict[str, object]:
@@ -186,6 +212,7 @@ class LotteryResearchService:
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
+        execution_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         options = self._build_options(
             evaluation_size,
@@ -205,6 +232,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            execution_overrides,
         )
         assets = self.runtime.load_workspace()
         self._ensure_world_v2_kuzu_synced(runtime_mode, assets)
@@ -256,6 +284,7 @@ class LotteryResearchService:
         session_id: str | None = None,
         assets: WorkspaceAssets | None = None,
         visible_through_period: str | None = None,
+        execution_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         del evaluation_size
         self.ensure_world_runtime_ready(runtime_mode)
@@ -280,6 +309,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            execution_overrides,
         )
         if assets is None:
             assets = self._assets_for_visible_through_period(
@@ -316,6 +346,7 @@ class LotteryResearchService:
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
         visible_through_period: str | None = None,
+        execution_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         if runtime_mode not in (WORLD_V1_RUNTIME_MODE, WORLD_V2_MARKET_RUNTIME_MODE):
             raise ValueError(f"prepare_world_session unsupported mode: {runtime_mode}")
@@ -341,6 +372,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            execution_overrides,
         )
         assets = self._assets_for_visible_through_period(
             full_assets,
@@ -348,7 +380,14 @@ class LotteryResearchService:
         )
         selected = self._selected_world_strategies(assets, strategy_ids, runtime_mode)
         rt = self._runtime_for_mode(runtime_mode)
-        session = rt.prepare_session(assets, selected, pick_size, options.model_name, options.session_id)
+        session = rt.prepare_session(
+            assets,
+            selected,
+            pick_size,
+            options.model_name,
+            options.session_id,
+            options.execution_overrides,
+        )
         return {
             "evaluation": {
                 "runtime_mode": runtime_mode,
@@ -368,9 +407,12 @@ class LotteryResearchService:
                 "current_phase": session["current_phase"],
                 "current_period": session.get("current_period"),
                 "llm_model_name": session.get("llm_model_name"),
+                "game_id": session.get("game_id", "happy8"),
                 "active_agent_ids": session.get("active_agent_ids", []),
                 "shared_memory": session["shared_memory"],
                 "agents": session["agents"],
+                "execution_overrides_snapshot": session.get("execution_overrides", {}),
+                "resolved_execution_bindings": session.get("resolved_execution_bindings", {}),
                 "asset_manifest": session.get("asset_manifest", []),
             },
         }
@@ -532,6 +574,7 @@ class LotteryResearchService:
         live_interview_enabled: bool,
         budget_yuan: int,
         session_id: str | None,
+        execution_overrides: dict[str, object] | None,
     ) -> LLMRunOptions:
         validate_request(
             evaluation_size,
@@ -563,6 +606,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            self.execution_registry.normalize_overrides(execution_overrides),
         )
 
 
@@ -573,10 +617,24 @@ def _optional_string(value: object) -> str | None:
     return text or None
 
 
-def _no_mcp_world_v2_client():
+def _no_mcp_world_v2_client(execution_registry: ExecutionRegistry):
     if not allow_world_v2_without_mcp():
         return None
     reload_project_env()
-    if str(os.environ.get("LETTA_BASE_URL", "")).strip():
+    backend = world_v2_no_mcp_backend()
+    has_letta = bool(str(os.environ.get("LETTA_BASE_URL", "")).strip())
+    if backend == NO_MCP_BACKEND_LETTA:
+        if not has_letta:
+            raise ValueError("LOTTERY_WORLD_NO_MCP_BACKEND=letta requires LETTA_BASE_URL")
         return LettaNoMcpClient()
-    return LocalWorldClient()
+    if backend == NO_MCP_BACKEND_LOCAL:
+        return LocalWorldClient(execution_registry=execution_registry)
+    if has_letta:
+        return LettaNoMcpClient()
+    return LocalWorldClient(execution_registry=execution_registry)
+
+
+def _world_v2_no_mcp_client(execution_registry: ExecutionRegistry):
+    if len(inspect.signature(_no_mcp_world_v2_client).parameters) == 0:
+        return _no_mcp_world_v2_client()
+    return _no_mcp_world_v2_client(execution_registry)

@@ -15,6 +15,11 @@ from requests import RequestException
 from ...config import Config, PROJECT_ROOT, reload_project_env
 from .constants import WORLD_V2_MARKET_RUNTIME_MODE
 from .letta_runtime_support import RuntimePaths, runtime_paths
+from .world_runtime_backend import (
+    NO_MCP_BACKEND_LETTA,
+    NO_MCP_BACKEND_LOCAL,
+    world_v2_no_mcp_backend,
+)
 from .world_runtime_flags import allow_world_v2_without_mcp
 
 
@@ -38,7 +43,19 @@ def runtime_readiness(runtime_mode: str, letta_client: object | None = None) -> 
     if mode != WORLD_V2_MARKET_RUNTIME_MODE:
         return _ready_payload(mode)
     if allow_world_v2_without_mcp():
+        backend = world_v2_no_mcp_backend()
         env_letta_base_url = _explicit_letta_base_url()
+        if backend == NO_MCP_BACKEND_LOCAL:
+            return _local_no_mcp_payload(mode)
+        if backend == NO_MCP_BACKEND_LETTA:
+            if env_letta_base_url:
+                return _letta_no_mcp_payload(mode, env_letta_base_url.rstrip("/"), "env")
+            return _blocked(
+                _base_payload(mode, "", "unset"),
+                "letta_not_configured",
+                "LOTTERY_WORLD_NO_MCP_BACKEND=letta but LETTA_BASE_URL is not configured.",
+                ["Set LETTA_BASE_URL or switch LOTTERY_WORLD_NO_MCP_BACKEND to local/auto."],
+            )
         if env_letta_base_url:
             return _letta_no_mcp_payload(mode, env_letta_base_url.rstrip("/"), "env")
         return _local_no_mcp_payload(mode)

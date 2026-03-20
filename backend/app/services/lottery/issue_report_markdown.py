@@ -1,4 +1,4 @@
-"""Markdown rendering for fixed per-issue reports."""
+"""Markdown rendering for per-issue reports."""
 
 from __future__ import annotations
 
@@ -26,13 +26,20 @@ def build_issue_report_markdown(report: dict[str, Any]) -> str:
 def background_markdown(section: dict[str, Any]) -> list[str]:
     config = dict(section.get("runtime_config") or {})
     participants = list(section.get("participants") or [])
+    runtime_line = (
+        f"runtime={config.get('runtime_mode', '-')} / "
+        f"model={config.get('llm_model_name', '-')} / "
+        f"rounds={config.get('agent_dialogue_rounds', '-')} / "
+        f"live_interview={config.get('live_interview_enabled', '-')}"
+    )
     return [
         "## 1. 本期背景",
         "",
         f"- 最后已知期: `{section.get('last_known_issue', '-')}`",
         f"- 目标预测期: `{section.get('target_prediction_issue', '-')}`",
-        f"- 风险可见开奖区间: {section.get('risk_visible_draw_window', '-')}",
-        f"- 运行配置: `runtime={config.get('runtime_mode', '-')} / model={config.get('llm_model_name', '-')} / rounds={config.get('agent_dialogue_rounds', '-')} / live_interview={config.get('live_interview_enabled', '-')}`",
+        f"- 游戏内核: `{section.get('game_id', 'happy8')}`",
+        f"- 风险可见开奖区间: `{section.get('risk_visible_draw_window', '-')}`",
+        f"- 运行配置: `{runtime_line}`",
         f"- 参与 agent 列表: `{', '.join(_participant_label(item) for item in participants) or '-'}`",
         "",
     ]
@@ -64,8 +71,8 @@ def purchase_comparison_markdown(section: dict[str, Any]) -> list[str]:
         f"- 玩法: `{section.get('gameplay', '-')}`",
         f"- 组合结构: `{section.get('plan_type', '-')}` / {structure or '-'}",
         f"- purchase_chair 方案: `{number_line(section.get('purchase_chair_numbers', []))}`",
-        f"- final decider 方案: `{number_line(section.get('official_numbers', []))}`",
-        f"- 最终是否采纳购买建议: `{section.get('accepted_by_final_decider', False)}`",
+        f"- 最终采用号码: `{number_line(section.get('official_numbers', []))}`",
+        f"- 是否直接采用 purchase_chair 主建议: `{section.get('accepted_by_final_decider', False)}`",
         "",
     ]
 
@@ -74,7 +81,7 @@ def final_decision_markdown(section: dict[str, Any]) -> list[str]:
     return [
         "## 5. 最终决策",
         "",
-        f"- final decider 选了什么: `{number_line(section.get('numbers', []))}`",
+        f"- 最终采用了什么: `{number_line(section.get('numbers', []))}`",
         f"- 备用号码: `{number_line(section.get('alternate_numbers', []))}`",
         f"- 为什么选: {section.get('why_selected', '-')}",
         f"- 为什么没选其他方案: {section.get('why_not_others', '-')}",
@@ -84,13 +91,30 @@ def final_decision_markdown(section: dict[str, Any]) -> list[str]:
 
 
 def postmortem_markdown(section: dict[str, Any]) -> list[str]:
+    if section.get("pending"):
+        return [
+            "## 6. 开奖后复盘",
+            "",
+            "- 尚未开奖，暂无复盘。",
+            "",
+        ]
     lines = [
         "## 6. 开奖后复盘",
         "",
         f"- 实际开奖号: `{number_line(section.get('actual_numbers', []))}`",
-        f"- 各方案命中情况: 官方 `{section.get('official_hits', '-')}` / 购买 `{section.get('purchase_hits', '-')}`",
-        f"- 各组最佳命中: `{', '.join(_best_group_line(item) for item in section.get('group_best_hits', [])) or '-'}`",
-        f"- 盈亏 / ROI / payout: `{section.get('profit_yuan', '-')}` / `{section.get('roi', '-')}` / `{section.get('payout_yuan', '-')}`",
+        (
+            f"- 各方案命中情况: 官方 `{section.get('official_hits', '-')}` / "
+            f"购买 `{section.get('purchase_hits', '-')}`"
+        ),
+        (
+            f"- 各组最佳命中: "
+            f"`{', '.join(_best_group_line(item) for item in section.get('group_best_hits', [])) or '-'}`"
+        ),
+        (
+            f"- 盈亏 / ROI / payout: "
+            f"`{section.get('profit_yuan', '-')}` / `{section.get('roi', '-')}` / "
+            f"`{section.get('payout_yuan', '-')}`"
+        ),
     ]
     lines.extend(_string_block("对下期的权重校准建议", section.get("weight_calibration_suggestions")))
     return lines
@@ -101,8 +125,9 @@ def _signal_group_lines(rows: list[dict[str, Any]]) -> list[str]:
         return ["- 无。", ""]
     lines = []
     for item in rows:
+        label = item.get("display_name", item.get("strategy_id", "-"))
         lines.append(
-            f"- {item.get('display_name', item.get('strategy_id', '-'))} (`{item.get('strategy_id', '-')}`): "
+            f"- {label} (`{item.get('strategy_id', '-')}`): "
             f"`{number_line(item.get('numbers', []))}` | {item.get('rationale', '-')}"
         )
     lines.append("")
@@ -110,7 +135,11 @@ def _signal_group_lines(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def _participant_label(item: dict[str, Any]) -> str:
-    return f"{item.get('display_name', item.get('agent_id', '-'))}({item.get('group', '-')})"
+    binding = dict(item.get("execution_binding") or {})
+    profile_id = item.get("profile_id") or binding.get("profile_id") or "-"
+    model_id = item.get("model_id") or binding.get("model_id") or "-"
+    agent_id = item.get("agent_id") or item.get("display_name", "-")
+    return f"{agent_id}({item.get('group', '-')}/{profile_id}/{model_id})"
 
 
 def _best_group_line(item: dict[str, Any]) -> str:

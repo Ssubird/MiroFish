@@ -46,8 +46,9 @@ class KuzuGraphService:
     """Persist the lottery graph in a local Kuzu database."""
 
     def __init__(self, state_file: Path | None = None, db_root: str | None = None):
-        self.state_store = KuzuGraphStateStore(state_file or STATE_FILE)
         self.db_root = Path(db_root or Config.KUZU_GRAPH_ROOT)
+        default_state = self.db_root.parent / f"{self.db_root.name}.state.json"
+        self.state_store = KuzuGraphStateStore(state_file or default_state)
         self._database: kuzu.Database | None = None
         self._database_lock = Lock()
 

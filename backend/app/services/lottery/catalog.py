@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections import Counter
 
 from ...config import Config
+from .agent_fabric_registry import AgentFabricRegistry
 from .agents import (
     build_data_agents,
+    build_full_context_agents,
     build_hybrid_agents,
     build_judge_agents,
     build_metaphysics_agents,
@@ -28,16 +30,25 @@ def build_strategy_catalog(chart_count: int = 0) -> dict[str, object]:
     strategies.update(build_data_agents())
     strategies.update(build_metaphysics_agents(chart_count))
     strategies.update(build_hybrid_agents())
+    strategies.update(build_full_context_agents())
     return strategies
 
 
 def build_market_v2_catalog(chart_count: int = 0) -> dict[str, object]:
     """Catalog for World V2 Market: generators + social + selected judges."""
     strategies = build_strategy_catalog(chart_count)
-    strategies.update(build_social_agents())
-    judge_agents = build_judge_agents()
-    for strategy_id in MARKET_V2_JUDGE_IDS:
-        strategy = judge_agents.get(strategy_id)
+    fabric_agents = AgentFabricRegistry().market_strategy_agents()
+    if not fabric_agents:
+        fabric_agents = {}
+        fabric_agents.update(build_social_agents())
+        judge_agents = build_judge_agents()
+        for strategy_id in MARKET_V2_JUDGE_IDS:
+            strategy = judge_agents.get(strategy_id)
+            if strategy is not None:
+                fabric_agents[strategy_id] = strategy
+    for strategy_id, strategy in fabric_agents.items():
+        if getattr(strategy, "group", "") == "judge" and strategy_id not in MARKET_V2_JUDGE_IDS:
+            continue
         if strategy is not None:
             strategies[strategy_id] = strategy
     return strategies
@@ -69,7 +80,8 @@ def build_llm_status() -> dict[str, object]:
         "default_agent_dialogue_rounds": DEFAULT_AGENT_DIALOGUE_ROUNDS,
         "note": (
             "Persistent world exposes generator boards by default: data, "
-            "metaphysics_fused_board, and hybrid_fused_board. Social, judge, "
-            "purchase_chair, and handbook_decider participate inside world_v2_market."
+            "metaphysics_fused_board, and hybrid_fused_board. World_v2_market "
+            "uses one market summary role, one execution gate judge, multiple "
+            "purchase personas, and purchase_chair as the final purchase owner."
         ),
     }

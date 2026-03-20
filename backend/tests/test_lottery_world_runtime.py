@@ -110,7 +110,7 @@ class FakeLettaClient:
                 '"rationale":"handbook keeps the cold core and accepts the chair plan.",'
                 '"risk_note":"avoid over-crowded tails"}'
             )
-        if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
+        if "Choose the best reference plan for the market" in content or "purchase_chair" in agent_id:
             return (
                 '{"plan_style":"balanced","plan_type":"wheel","play_size":5,'
                 '"play_size_review":{"3":"too thin","4":"acceptable","5":"best balance","6":"too diffuse"},'
@@ -120,7 +120,7 @@ class FakeLettaClient:
                 '"avoid_numbers":[10],"comment":"chair closes on balanced wheel",'
                 '"rationale":"chair closes on balanced wheel"}'
             )
-        if "Your persona budget:" in content:
+        if "Return one executable purchase proposal" in content:
             return (
                 '{"plan_style":"market","plan_type":"tickets","play_size":5,'
                 '"play_size_review":{"3":"too defensive","4":"still light","5":"fits main consensus","6":"too loose"},'
@@ -146,7 +146,7 @@ class FakeLettaClient:
 
 class BrokenPurchaseLettaClient(FakeLettaClient):
     def send_message(self, agent_id, content):
-        if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
+        if "Choose the best reference plan for the market" in content or "purchase_chair" in agent_id:
             return '{"plan_style":"broken","primary_ticket":[1,2,3,4,5],"rationale":"missing plan_type"}'
         return super().send_message(agent_id, content)
 
@@ -159,7 +159,7 @@ class RepairingPurchaseLettaClient(FakeLettaClient):
     def send_message(self, agent_id, content):
         if "Validation failed for your previous purchase plan" in content:
             return super().send_message(agent_id, content)
-        if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
+        if "Choose the best reference plan for the market" in content or "purchase_chair" in agent_id:
             self._chair_calls += 1
             if self._chair_calls == 1:
                 return (
@@ -222,7 +222,7 @@ class DuplicateBettorLettaClient(FakeLettaClient):
         self._bettor_calls = 0
 
     def send_message(self, agent_id, content):
-        if "Your persona budget:" in content:
+        if "Return one executable purchase proposal" in content:
             self._bettor_calls += 1
             if self._bettor_calls == 1:
                 return (
@@ -246,7 +246,7 @@ def _local_world_response(self, session, agent_id, content):
             '"rationale":"handbook keeps the cold core and accepts the chair plan.",'
             '"risk_note":"avoid over-crowded tails"}'
         )
-    if "Choose one reference plan for the market" in content or "purchase_chair" in agent_id:
+    if "Choose the best reference plan for the market" in content or "purchase_chair" in agent_id:
         return (
             '{"plan_style":"balanced","plan_type":"wheel","play_size":5,'
             '"play_size_review":{"3":"too thin","4":"acceptable","5":"best balance","6":"too diffuse"},'
@@ -256,7 +256,7 @@ def _local_world_response(self, session, agent_id, content):
             '"avoid_numbers":[10],"comment":"chair closes on balanced wheel",'
             '"rationale":"chair closes on balanced wheel"}'
         )
-    if "Your persona budget:" in content:
+    if "Return one executable purchase proposal" in content:
         return (
             '{"plan_style":"market","plan_type":"tickets","play_size":5,'
             '"play_size_review":{"3":"too defensive","4":"still light","5":"fits main consensus","6":"too loose"},'
@@ -339,10 +339,13 @@ def test_world_advance_uses_market_runtime_and_projects_market_payload():
     assert any(item["event_type"] == "purchase_decision" for item in pending["world_timeline_preview"])
     agent_ids = {item["session_agent_id"] for item in session["session"]["agents"]}
     assert "purchase_chair" in agent_ids
-    assert "handbook_decider" in agent_ids
+    assert "purchase_value_guard" in agent_ids
+    assert "purchase_coverage_builder" in agent_ids
+    assert "purchase_ziwei_conviction" in agent_ids
+    assert "handbook_decider" not in agent_ids
     assert "consensus_judge" in agent_ids
     assert "social_consensus_feed" in agent_ids
-    assert "social_risk_feed" in agent_ids
+    assert "social_risk_feed" not in agent_ids
     assert "world_analyst" not in agent_ids
     assert not any(agent_id.startswith("bettor_") for agent_id in agent_ids)
     assert "happy8_rules_mcp" in fake_client.mcp_servers
@@ -466,6 +469,20 @@ def test_world_budget_updates_shared_memory_and_session():
     assert result["world_session"]["shared_memory"]["purchase_budget"] == "Current purchase budget: 20 yuan."
 
 
+def test_world_payload_preserves_agent_dialogue_enabled_flag():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        service, _, _ = _service(temp_dir)
+        result = service.advance_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            agent_dialogue_enabled=False,
+            live_interview_enabled=False,
+        )
+
+    assert result["evaluation"]["agent_dialogue_enabled"] is False
+
+
 def test_world_advance_can_run_in_explicit_no_mcp_mode(monkeypatch):
     monkeypatch.setenv("LOTTERY_WORLD_ALLOW_NO_MCP", "true")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
@@ -542,7 +559,7 @@ def test_world_advance_with_strict_letta_blocks_updates_shared_memory():
         assert blocks["current_issue"]
 
 
-def test_world_registers_handbook_decider_and_sends_bound_prompt_asset():
+def test_world_binds_full_prompt_assets_to_purchase_chair():
     with tempfile.TemporaryDirectory() as temp_dir:
         service, fake_client, _ = _service(temp_dir, CapturePromptLettaClient())
         result = service.advance_world_session(
@@ -555,18 +572,19 @@ def test_world_registers_handbook_decider_and_sends_bound_prompt_asset():
         session = service.get_world_session(result["world_session"]["session_id"])
 
     agent_ids = {item["session_agent_id"] for item in session["session"]["agents"]}
-    passages = fake_client.passages["letta_handbook_decider"]
-    handbook_prompt = fake_client.prompt_log["letta_handbook_decider"]
-    handbook_block = fake_client.blocks["letta_handbook_decider"]["handbook_principles"]
+    passages = fake_client.passages["letta_purchase_chair"]
+    handbook_prompt = fake_client.prompt_log["letta_purchase_chair"]
+    handbook_block = fake_client.blocks["letta_purchase_chair"]["handbook_principles"]
 
-    assert "handbook_decider" in agent_ids
-    assert any("lottery_handbook_deep_notes.md" in item["text"] for item in passages)
+    assert "handbook_decider" not in agent_ids
+    assert "purchase_chair" in agent_ids
+    assert "lottery_handbook_deep_notes.md" in handbook_block
     assert "lottery_handbook_deep_notes" in handbook_block
-    assert "Purchase recommendation:" in handbook_prompt
+    assert "Choose the best reference plan for the market" in handbook_prompt
     assert result["pending_prediction"]["final_decision"]["numbers"] == [1, 2, 3, 4, 5]
 
 
-def test_world_chunks_large_bound_prompt_passages_for_handbook_decider_limits():
+def test_world_chunks_large_bound_prompt_passages_for_purchase_chair_limits():
     with tempfile.TemporaryDirectory() as temp_dir:
         service, fake_client, workspace = _service(temp_dir, PassageLimitLettaClient())
         large_docs = []
@@ -593,10 +611,10 @@ def test_world_chunks_large_bound_prompt_passages_for_handbook_decider_limits():
         session = service.get_world_session(result["world_session"]["session_id"])
         timeline = service.get_world_timeline(result["world_session"]["session_id"], 0, 200)
 
-    passages = fake_client.passages["letta_handbook_decider"]
-    state = session["session"]["agent_state"]["handbook_decider"]
+    passages = fake_client.passages["letta_purchase_chair"]
+    state = session["session"]["agent_state"]["purchase_chair"]
     registration = next(
-        item for item in timeline["items"] if item["event_type"] == "agent_registered" and item["actor_id"] == "handbook_decider"
+        item for item in timeline["items"] if item["event_type"] == "agent_registered" and item["actor_id"] == "purchase_chair"
     )
 
     assert result["world_session"]["status"] == "await_result"
@@ -609,6 +627,7 @@ def test_world_chunks_large_bound_prompt_passages_for_handbook_decider_limits():
 
 def test_service_prefers_letta_client_in_explicit_no_mcp_mode(monkeypatch):
     monkeypatch.setenv("LOTTERY_WORLD_ALLOW_NO_MCP", "true")
+    monkeypatch.setenv("LOTTERY_WORLD_NO_MCP_BACKEND", "auto")
     fake_client = NoMcpFakeLettaClient()
     monkeypatch.setattr("app.services.lottery.research_service.LettaNoMcpClient", lambda: fake_client)
 
@@ -631,6 +650,32 @@ def test_service_prefers_letta_client_in_explicit_no_mcp_mode(monkeypatch):
         )
 
     assert service.world_v2_runtime.letta_client is fake_client
+
+
+def test_service_can_force_local_client_in_explicit_no_mcp_mode(monkeypatch):
+    monkeypatch.setenv("LOTTERY_WORLD_ALLOW_NO_MCP", "true")
+    monkeypatch.setenv("LOTTERY_WORLD_NO_MCP_BACKEND", "local")
+    monkeypatch.setenv("LETTA_BASE_URL", "http://127.0.0.1:8283/v1")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        workspace = _workspace()
+        graph_service = FakeGraphService()
+        kuzu_graph_service = KuzuGraphService(db_root=str(Path(temp_dir) / "kuzu"))
+        world_runtime = LotteryWorldRuntime(
+            graph_service,
+            store=WorldSessionStore(str(Path(temp_dir) / "world")),
+            letta_client=None,
+            kuzu_graph_service=kuzu_graph_service,
+        )
+        service = LotteryResearchService(
+            repository=WorkspaceRepository(workspace),
+            graph_service=graph_service,
+            kuzu_graph_service=kuzu_graph_service,
+            report_writer=LotteryReportWriter(Path(temp_dir)),
+            world_runtime=world_runtime,
+        )
+
+    assert isinstance(service.world_v2_runtime.letta_client, LocalWorldClient)
 
 
 def test_world_market_runtime_removes_bettor_personas():

@@ -1,0 +1,34 @@
+agent_id: social_consensus_feed
+display_name: LLM-市场脉冲摘要
+description: 读取各组选号与近期表现，压缩当前最有交易密度的市场主叙事，供购买层参考。
+behavior_template: social_discussion
+role_kind: social
+group: social
+phases: [social_propagation]
+profile_id: social_default
+prompt:
+  blocks:
+    - type: prompt_file
+      path: social_discussion_doctrine.md
+    - type: static_text
+      title: 市场脉冲职责
+      text: 只总结当前主叙事和高交易密度号码，不替代购买层做购票决定。
+document_refs:
+  - lottery_handbook_deep_notes.md
+shared_memory_keys:
+  - current_issue
+  - market_board
+  - social_feed
+  - handbook_principles
+  - report_digest
+  - rule_digest
+  - purchase_budget
+visible_groups: [data, metaphysics, hybrid, social]
+visible_agents: []
+dialogue_policy:
+  mode: single_pass
+  rounds: 1
+limits:
+  max_prompt_passages: 20
+metadata:
+  social_mode: consensus

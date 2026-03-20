@@ -6,6 +6,8 @@ from ...config import Config
 
 
 LOTTERY_ROOT = Path(Config.LOTTERY_DATA_ROOT).resolve()
+AGENT_FABRIC_DIR = Path(Config.AGENT_FABRIC_ROOT).resolve()
+AGENT_FABRIC_GENERATED_DIR = Path(Config.AGENT_FABRIC_GENERATED_ROOT).resolve()
 DATA_DIR = LOTTERY_ROOT / "data"
 DRAWS_DIR = DATA_DIR / "draws"
 CHARTS_DIR = DATA_DIR / "charts"

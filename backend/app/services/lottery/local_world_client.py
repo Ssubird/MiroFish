@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ...config import Config
 from ...utils.llm_client import LLMClient
+from .execution_models import ExecutionProfile, ResolvedExecutionBinding
+from .execution_registry import ExecutionRegistry
 
 
 DEFAULT_MAX_JSON_TOKENS = 1600
@@ -21,8 +22,9 @@ class LocalWorldClient:
     local_no_mcp = True
     runtime_backend = "local_no_mcp"
 
-    def __init__(self) -> None:
+    def __init__(self, execution_registry: ExecutionRegistry | None = None) -> None:
         self._agents: dict[str, dict[str, Any]] = {}
+        self._registry = execution_registry or ExecutionRegistry()
 
     def create_agent(
         self,
@@ -81,15 +83,110 @@ class LocalWorldClient:
     def send_message_for_session(self, session: dict[str, Any], agent_id: str, content: str) -> str:
         agent = self._agent(agent_id)
         messages = self._messages(agent, content)
-        client = self._client(session)
-        if _expects_json(content):
-            payload = client.chat_json(messages, temperature=0.2, max_tokens=DEFAULT_MAX_JSON_TOKENS)
-            return json.dumps(payload, ensure_ascii=False)
-        return client.chat(messages, temperature=0.3, max_tokens=DEFAULT_MAX_TEXT_TOKENS)
+        expect_json = _expects_json(content)
+        errors = []
+        for binding in self._bindings_for_agent(session, agent_id):
+            try:
+                client = self._client_for_binding(binding)
+                temperature = binding.temperature if expect_json else max(binding.temperature, 0.3)
+                max_tokens = binding.max_tokens if expect_json else min(binding.max_tokens, DEFAULT_MAX_TEXT_TOKENS)
+                self._record_binding_use(session, binding)
+                if expect_json:
+                    payload = client.chat_json(messages, temperature=temperature, max_tokens=max_tokens)
+                    return json.dumps(payload, ensure_ascii=False)
+                return client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            except Exception as exc:
+                errors.append(f"{binding.profile_id}: {exc}")
+        raise RuntimeError("; ".join(errors))
 
-    def _client(self, session: dict[str, Any]) -> LLMClient:
-        model_name = str(session.get("llm_model_name") or Config.LLM_MODEL_NAME).strip()
-        return LLMClient(model=model_name or None)
+    def _client_for_binding(self, binding: ResolvedExecutionBinding) -> LLMClient:
+        profile = self._registry.profile(binding.profile_id)
+        return self._registry.build_client(profile)
+
+    def _bindings_for_agent(self, session: dict[str, Any], agent_id: str) -> list[ResolvedExecutionBinding]:
+        binding = self._binding_for_agent(session, agent_id)
+        rows = [binding]
+        for profile_id in binding.fallback_profile_ids:
+            fallback = self._registry.resolve_binding(
+                binding.agent_id,
+                binding.role_kind,
+                binding.group,
+                {"agent_overrides": {binding.agent_id: profile_id}, "group_overrides": {}},
+                routing_mode="active",
+            )
+            rows.append(
+                ResolvedExecutionBinding(
+                    **{
+                        **fallback.to_dict(),
+                        "fallback_profile_ids": (),
+                        "metadata": {**dict(fallback.metadata), "fallback_from": binding.profile_id},
+                    }
+                )
+            )
+        return rows
+
+    def _binding_for_agent(self, session: dict[str, Any], agent_id: str) -> ResolvedExecutionBinding:
+        agent = self._agent(agent_id)
+        session_agent_id = str((agent.get("metadata") or {}).get("session_agent_id") or agent_id).strip()
+        resolved = dict(session.get("resolved_execution_bindings") or {})
+        if session_agent_id in resolved:
+            payload = dict(resolved[session_agent_id])
+            return ResolvedExecutionBinding(
+                agent_id=session_agent_id,
+                role_kind=str(payload.get("role_kind", "generator")),
+                group=payload.get("group"),
+                profile_id=str(payload.get("profile_id", "default")),
+                provider_id=str(payload.get("provider_id", "default")),
+                model_id=str(payload.get("model_id", "default")),
+                temperature=float(payload.get("temperature", 0.7)),
+                max_tokens=int(payload.get("max_tokens", 2000)),
+                json_mode=bool(payload.get("json_mode", False)),
+                retry_count=int(payload.get("retry_count", 2)),
+                retry_backoff_ms=int(payload.get("retry_backoff_ms", 1500)),
+                timeout_s=int(payload.get("timeout_s", 120)),
+                prompt_style=str(payload.get("prompt_style", "strict_json")),
+                fallback_profile_ids=tuple(payload.get("fallback_profile_ids") or ()),
+                routing_mode=str(payload.get("routing_mode", "active")),
+                metadata=dict(payload.get("metadata") or {}),
+            )
+        return self._resolved_binding_from_metadata(agent_id)
+
+    def _resolved_binding_from_metadata(self, agent_id: str) -> ResolvedExecutionBinding:
+        profile = self._profile_from_metadata(agent_id)
+        agent = self._agent(agent_id)
+        role_kind = str((agent.get("metadata") or {}).get("role_kind", "generator"))
+        group = (agent.get("metadata") or {}).get("group")
+        return ResolvedExecutionBinding(
+            agent_id=str((agent.get("metadata") or {}).get("session_agent_id") or agent_id),
+            role_kind=role_kind,
+            group=group,
+            profile_id=profile.profile_id,
+            provider_id=profile.provider_id,
+            model_id=profile.model_id,
+            temperature=profile.temperature,
+            max_tokens=profile.max_tokens,
+            json_mode=profile.json_mode,
+            retry_count=profile.retry_count,
+            retry_backoff_ms=profile.retry_backoff_ms,
+            timeout_s=profile.timeout_s,
+            prompt_style=profile.prompt_style,
+            fallback_profile_ids=profile.fallback_profile_ids,
+            routing_mode="active",
+        )
+
+    def _profile_from_metadata(self, agent_id: str) -> ExecutionProfile:
+        agent = self._agent(agent_id)
+        metadata = agent.get("metadata") or {}
+        role_kind = metadata.get("role_kind", "generator")
+        group = metadata.get("group")
+        return self._registry.resolve_profile(agent_id, role_kind, group)
+
+    def _record_binding_use(self, session: dict[str, Any], binding: ResolvedExecutionBinding) -> None:
+        metrics = session.setdefault("request_metrics", {})
+        metrics["last_profile_id"] = binding.profile_id
+        metrics["last_provider_id"] = binding.provider_id
+        metrics["last_model_id"] = binding.model_id
+        metrics["binding_uses"] = int(metrics.get("binding_uses", 0)) + 1
 
     def _agent(self, agent_id: str) -> dict[str, Any]:
         try:

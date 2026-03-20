@@ -22,6 +22,7 @@ export const useLotteryWorld = (setError) => {
   const worldResult = ref(null)
   const worldGraph = ref({ nodes: [], edges: [], metrics: {} })
   const recentDrawStats = ref({ numbers: [], hot_numbers: [], cold_numbers: [] })
+  const worldLastInterview = ref(null)
   const worldLoading = ref(false)
   const worldInterviewBusy = ref(false)
   const worldInterviewAgentId = ref('')
@@ -39,6 +40,7 @@ export const useLotteryWorld = (setError) => {
     worldResult.value = null
     worldGraph.value = { nodes: [], edges: [], metrics: {} }
     recentDrawStats.value = { numbers: [], hot_numbers: [], cold_numbers: [] }
+    worldLastInterview.value = null
   }
 
   const loadWorld = async (sessionId) => {
@@ -59,6 +61,7 @@ export const useLotteryWorld = (setError) => {
       worldGraph.value = graphResponse.data
       recentDrawStats.value = statsResponse.data
       worldResult.value = sessionResponse.data.result_available ? (await getLotteryWorldResult(sessionId)).data : null
+      syncLastInterview()
       ensureInterviewAgent()
       return snapshot()
     } catch (err) {
@@ -91,6 +94,7 @@ export const useLotteryWorld = (setError) => {
       worldGraph.value = graphResponse.data
       recentDrawStats.value = statsResponse.data
       worldResult.value = response.data.result_available ? (await getLotteryWorldResult(sessionId)).data : null
+      syncLastInterview()
       ensureInterviewAgent()
       return snapshot()
     } catch (err) {
@@ -170,10 +174,11 @@ export const useLotteryWorld = (setError) => {
     }
     worldInterviewBusy.value = true
     try {
-      await interviewLotteryWorldAgent(sessionId, {
+      const response = await interviewLotteryWorldAgent(sessionId, {
         agent_id: worldInterviewAgentId.value,
         prompt: worldInterviewPrompt.value.trim()
       })
+      worldLastInterview.value = response.data?.data || null
       worldInterviewPrompt.value = ''
       await loadWorld(sessionId)
     } catch (err) {
@@ -186,6 +191,25 @@ export const useLotteryWorld = (setError) => {
   const ensureInterviewAgent = () => {
     if (worldAgents.value.some((item) => item.session_agent_id === worldInterviewAgentId.value)) return
     worldInterviewAgentId.value = worldAgents.value[0]?.session_agent_id || ''
+  }
+
+  const syncLastInterview = () => {
+    const event = [...(worldTimeline.value?.items || [])]
+      .reverse()
+      .find((item) => item.event_type === 'external_interview')
+    if (!event) {
+      worldLastInterview.value = null
+      return
+    }
+    worldLastInterview.value = {
+      agent_id: event.actor_id,
+      display_name: event.actor_display_name || event.actor_id,
+      answer: event.content || '',
+      question: event.metadata?.question || '',
+      period: event.period || '',
+      phase: event.phase || '',
+      event_id: event.event_id
+    }
   }
 
   const snapshot = () => ({
@@ -204,6 +228,7 @@ export const useLotteryWorld = (setError) => {
     worldResult,
     worldGraph,
     recentDrawStats,
+    worldLastInterview,
     worldLoading,
     worldInterviewBusy,
     worldInterviewAgentId,

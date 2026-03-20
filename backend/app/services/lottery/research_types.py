@@ -38,6 +38,7 @@ class LLMRunOptions:
     live_interview_enabled: bool
     budget_yuan: int
     session_id: str | None = None
+    execution_overrides: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -44,6 +44,10 @@ def handbook_role_metadata(note: str = "") -> dict[str, object]:
     return metadata
 
 
+def chunk_prompt_asset(name: str, content: str, label: str, limit: int) -> list[str]:
+    return _document_chunks(name, content, label, limit)
+
+
 def _matching_prompt_docs(context, document_names: tuple[str, ...]) -> list[object]:
     prompt_docs = list(getattr(context, "prompt_documents", ()) or ())
     if not prompt_docs:

@@ -9,6 +9,7 @@ from app.services.lottery.research_service import LotteryResearchService
 from app.services.lottery.research_types import WorkspaceAssets
 from app.services.lottery.world_runtime import LotteryWorldRuntime
 from app.services.lottery.world_store import WorldSessionStore
+from app.services.lottery.world_v2_runtime import AGENT_BLOCK_SCHEMA_VERSION, _session_compatible
 
 
 class FakeGraphService:
@@ -37,7 +38,17 @@ class FakeLettaClient:
                 '"chosen_edge":"chair keeps the core five","tickets":[[1,2,3,4,5]],'
                 '"primary_ticket":[1,2,3,4,5],"rationale":"chair"}'
             )
-        if any(name in agent_id for name in ("budget_guard", "coverage_builder", "upside_hunter")):
+        if "Return one executable purchase proposal" in content or any(
+            name in agent_id
+            for name in (
+                "budget_guard",
+                "coverage_builder",
+                "upside_hunter",
+                "purchase_value_guard",
+                "purchase_coverage_builder",
+                "purchase_ziwei_conviction",
+            )
+        ):
             return (
                 '{"plan_style":"committee","plan_type":"tickets","play_size":5,'
                 '"play_size_review":{"3":"thin","4":"ok","5":"best","6":"diffuse"},'
@@ -71,6 +82,10 @@ class RuleAgent(StrategyAgent):
         )
 
 
+class DisabledRuleAgent(RuleAgent):
+    default_enabled = False
+
+
 def test_world_v1_registers_generators_without_social_or_judge_amplifiers():
     with tempfile.TemporaryDirectory() as temp_dir:
         service = _service(
@@ -98,15 +113,27 @@ def test_world_v1_registers_generators_without_social_or_judge_amplifiers():
     assert "rule_interpreter" not in agent_ids
 
 
-def test_select_strategies_without_ids_returns_all():
+def test_select_strategies_without_ids_returns_default_enabled_only():
     strategies = {
         "primary_rule": RuleAgent("primary_rule", "Primary Rule", "primary", 1, "data"),
+        "full_context_rule": DisabledRuleAgent("full_context_rule", "Full Context", "full", 1, "metaphysics"),
         "hybrid_rule": RuleAgent("hybrid_rule", "Hybrid Rule", "hybrid", 1, "hybrid"),
     }
 
-    selected = list(strategies)
+    selected = select_strategies(strategies, None)
 
-    assert selected == ["primary_rule", "hybrid_rule"]
+    assert list(selected) == ["primary_rule", "hybrid_rule"]
+
+
+def test_select_strategies_can_explicitly_include_default_disabled_agent():
+    strategies = {
+        "primary_rule": RuleAgent("primary_rule", "Primary Rule", "primary", 1, "data"),
+        "full_context_rule": DisabledRuleAgent("full_context_rule", "Full Context", "full", 1, "metaphysics"),
+    }
+
+    selected = select_strategies(strategies, ["primary_rule", "full_context_rule"])
+
+    assert list(selected) == ["primary_rule", "full_context_rule"]
 
 
 def test_select_strategies_ignores_retired_world_amplifiers():
@@ -125,6 +152,20 @@ def test_select_strategies_ignores_retired_world_amplifiers():
     )
 
     assert list(selected) == ["primary_rule"]
+
+
+def test_world_v2_session_compatible_requires_exact_strategy_set():
+    session = {
+        "agent_block_schema_version": AGENT_BLOCK_SCHEMA_VERSION,
+        "selected_strategy_ids": ["primary_rule"],
+        "agents": [],
+    }
+    strategies = {
+        "primary_rule": RuleAgent("primary_rule", "Primary Rule", "primary", 1, "data"),
+        "full_context_rule": DisabledRuleAgent("full_context_rule", "Full Context", "full", 1, "metaphysics"),
+    }
+
+    assert _session_compatible(session, strategies) is False
 
 
 def _service(temp_dir: str, strategies: dict[str, StrategyAgent]):

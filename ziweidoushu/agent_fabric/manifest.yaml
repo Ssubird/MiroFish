@@ -1,0 +1,69 @@
+schema_version: 1
+prompt_char_limit: 2800
+
+phases:
+  - phase_id: social_propagation
+    active_groups: [social]
+  - phase_id: market_rerank
+    active_groups: [judge]
+  - phase_id: plan_synthesis
+    active_groups: [purchase]
+  - phase_id: handbook_final_decision
+    active_groups: [decision]
+
+groups:
+  - group_id: social
+    role_kind: social
+    default_profile_id: social_default
+    visible_groups: [data, metaphysics, hybrid, social]
+    shared_memory_keys:
+      - current_issue
+      - visible_draw_history_digest
+      - market_board
+      - social_feed
+      - handbook_principles
+      - report_digest
+      - rule_digest
+      - purchase_budget
+  - group_id: judge
+    role_kind: judge
+    default_profile_id: judge_default
+    visible_groups: [data, metaphysics, hybrid, social, judge]
+    shared_memory_keys:
+      - current_issue
+      - visible_draw_history_digest
+      - market_board
+      - social_feed
+      - handbook_principles
+      - report_digest
+      - rule_digest
+      - purchase_budget
+  - group_id: purchase
+    role_kind: purchase
+    default_profile_id: purchase_default
+    visible_groups: [data, metaphysics, hybrid, social, judge, purchase]
+    shared_memory_keys:
+      - current_issue
+      - visible_draw_history_digest
+      - market_board
+      - social_feed
+      - purchase_board
+      - handbook_principles
+      - report_digest
+      - rule_digest
+      - purchase_budget
+  - group_id: decision
+    role_kind: decision
+    default_profile_id: decision_default
+    visible_groups: [data, metaphysics, hybrid, social, judge, purchase, decision]
+    shared_memory_keys:
+      - current_issue
+      - visible_draw_history_digest
+      - market_board
+      - social_feed
+      - purchase_board
+      - handbook_principles
+      - final_decision_constraints
+      - report_digest
+      - rule_digest
+      - purchase_budget

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import asdict, replace
 import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 from threading import Lock
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from .backtest_support import (
     alternate_numbers,
@@ -22,11 +22,15 @@ from .backtest_support import (
     ensemble_numbers,
     evaluation_summary,
 )
+from .anti_crowding import AntiCrowdingService
+from .agent_fabric_registry import AgentFabricRegistry, PromptAssetBundle
 from .constants import PRIMARY_GROUPS, WORLD_V2_MARKET_RUNTIME_MODE, WORLD_V2_PHASES
 from .context import build_prediction_context
 from .document_filters import grounding_documents, manual_reference_documents, prompt_documents
+from .execution_registry import ExecutionRegistry
 from .execution import run_strategy_stage
 from .happy8_rules import DEFAULT_BUDGET_YUAN, TICKET_COST_YUAN, ticket_payout
+from .games.happy8 import Happy8GameDefinition, default_feature_profile
 from .letta_client import LettaClient
 from .market_diversity import (
     build_social_prompt_view,
@@ -38,10 +42,10 @@ from .market_role_registry import (
     handbook_role_metadata,
 )
 from .performance_summary import build_strategy_performance, performance_rows
-from .purchase_structures import planner_structure
 from .research_types import WorkspaceAssets
 from .runtime_helpers import contributor_breakdown, serialized_predictions
 from .serializers import serialize_prediction
+from .signal_boards import SignalBoard, serialize_signal_boards, signal_board_from_prediction
 from .world_assets import build_world_asset_manifest
 from .world_v2_market import (
     aggregate_number_scores,
@@ -116,13 +120,6 @@ WORLD_ROLES = (
         "purchase",
         "Synthesize the final executable market plan after reading bettor flow, judge boards, reports, and rule constraints.",
     ),
-    (
-        "handbook_decider",
-        "Handbook Decider",
-        "decision",
-        "decision",
-        "Read all generator boards, market discussion, purchase recommendation, and recent reviews, then publish the official final prediction for the next issue.",
-    ),
 )
 
 
@@ -135,11 +132,22 @@ class LotteryWorldV2Runtime:
         store: WorldSessionStore | None = None,
         letta_client: LettaClient | None = None,
         kuzu_graph_service=None,
+        execution_registry=None,
+        game_definition=None,
+        anti_crowding_service: AntiCrowdingService | None = None,
     ):
         self.graph_service = graph_service
         self.store = store or WorldSessionStore()
         self.letta_client = letta_client
         self.kuzu_graph_service = kuzu_graph_service
+        self.execution_registry = execution_registry or ExecutionRegistry()
+        self.game_definition = game_definition or Happy8GameDefinition()
+        self.anti_crowding_service = anti_crowding_service or AntiCrowdingService()
+        feature_weights = {}
+        feature_weights = dict(
+            self.execution_registry.happy8_feature_profile().get("payout_surrogate_weights") or {}
+        )
+        self.feature_profile = default_feature_profile(feature_weights)
         self._client_cache: dict[str, LettaClient] = {}
         self._metric_lock = Lock()
 
@@ -163,7 +171,14 @@ class LotteryWorldV2Runtime:
     ) -> dict[str, Any]:
         self._validate_request(pick_size, options.issue_parallelism)
         target_draw = _pending_target_draw(assets)
-        session = self.prepare_session(assets, strategies, pick_size, options.model_name, options.session_id)
+        session = self.prepare_session(
+            assets,
+            strategies,
+            pick_size,
+            options.model_name,
+            options.session_id,
+            options.execution_overrides,
+        )
         self._apply_runtime_budget(session, options.budget_yuan)
         session["visible_through_period"] = _visible_through_period(assets)
         self._sync_asset_manifest(session, target_draw.period)
@@ -189,19 +204,32 @@ class LotteryWorldV2Runtime:
         pick_size: int,
         model_name: str | None,
         session_id: str | None = None,
+        execution_overrides: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        self._agent_fabric_registry().validate_assets(assets)
         if session_id and self.store.session_exists(session_id):
             session = self.store.load_session(session_id)
             if _session_compatible(session, strategies):
+                self._apply_execution_overrides(session, execution_overrides)
+                self._sync_asset_manifest(session, _pending_target_draw(assets).period)
                 return session
         if not session_id:
             current_id = self.store.current_session_id()
             if current_id and self.store.session_exists(current_id):
                 session = self.store.load_session(current_id)
                 if _session_compatible(session, strategies):
+                    self._apply_execution_overrides(session, execution_overrides)
+                    self._sync_asset_manifest(session, _pending_target_draw(assets).period)
                     return session
         target_draw = _pending_target_draw(assets)
-        session = self._create_session(strategies, pick_size, model_name, DEFAULT_BUDGET_YUAN, session_id)
+        session = self._create_session(
+            strategies,
+            pick_size,
+            model_name,
+            DEFAULT_BUDGET_YUAN,
+            session_id,
+            execution_overrides,
+        )
         self._sync_asset_manifest(session, target_draw.period)
         self._persist_session(session)
         self._append_events(session, [self._status_event(session, "session_started", "Persistent world session created.")])
@@ -322,7 +350,15 @@ class LotteryWorldV2Runtime:
         )
         self._append_events(session, [event])
         self._append_public_discussion(session, [event], persist=True)
-        return {"agent_id": agent_id, "display_name": display_name, "answer": answer}
+        return {
+            "agent_id": agent_id,
+            "display_name": display_name,
+            "answer": answer,
+            "question": prompt,
+            "period": session.get("current_period") or "-",
+            "phase": session.get("current_phase") or "idle",
+            "event_id": event.event_id,
+        }
 
     def _validate_request(self, pick_size: int, issue_parallelism: int) -> None:
         if issue_parallelism != 1:
@@ -414,6 +450,7 @@ class LotteryWorldV2Runtime:
             signal_outputs,
             social_posts,
             market_ranks,
+            options.parallelism,
         )
 
         # 5. handbook_final_decision
@@ -424,6 +461,7 @@ class LotteryWorldV2Runtime:
             signal_outputs,
             social_posts,
             market_ranks,
+            synthesis,
             final_plan,
             leaderboard,
         )
@@ -459,11 +497,13 @@ class LotteryWorldV2Runtime:
             signal_output_from_prediction(prediction, performance.get(strategy_id))
             for strategy_id, prediction in predictions.items()
         ]
+        signal_boards = self._signal_boards(context.target_draw.period, predictions, context.history_draws)
         self._update_shared_memory(session, context, predictions, performance)
         events = self._opening_events(session, context.target_draw.period, predictions)
         self._append_events(session, events)
         round_state["signal_predictions"] = _serialize_prediction_map(predictions, leaderboard)
         round_state["signal_outputs"] = [serialize_signal_output(item) for item in signal_outputs]
+        round_state["signal_boards"] = serialize_signal_boards(signal_boards)
         round_state["opening_events"] = [item.to_dict() for item in events]
         self._set_issue_summary(
             session,
@@ -526,23 +566,24 @@ class LotteryWorldV2Runtime:
         self._complete_phase(session, "market_rerank")
         return ranks
 
-    def _phase_plan_synthesis(self, session, round_state, period: str, signal_outputs, social_posts, market_ranks):
+    def _phase_plan_synthesis(self, session, round_state, period: str, signal_outputs, social_posts, market_ranks, parallelism: int):
         if "plan_synthesis" in round_state and self._can_skip_phase(session, "plan_synthesis"):
             self._refresh_purchase_board_block(session, dict(round_state.get("final_plan", {})))
             return round_state["plan_synthesis"], dict(round_state.get("final_plan", {}))
         self._set_phase(session, "plan_synthesis")
 
-        synthesis, final_plan, event = self._synthesize_market(
+        synthesis, final_plan, events = self._synthesize_market(
             session,
             signal_outputs,
             social_posts,
             market_ranks,
+            parallelism,
         )
         round_state["plan_synthesis"] = synthesis
         round_state["final_plan"] = final_plan
         round_state["compatibility_projection"] = compatibility_projection(synthesis, final_plan)
-        if event is not None:
-            self._append_events(session, [event])
+        if events:
+            self._append_events(session, events)
         compat = round_state["compatibility_projection"]
         self._set_issue_summary(
             session,
@@ -570,21 +611,31 @@ class LotteryWorldV2Runtime:
         signal_outputs,
         social_posts,
         market_ranks,
+        market_synthesis,
         final_plan,
         leaderboard,
     ):
         if "final_decision" in round_state and self._can_skip_phase(session, "handbook_final_decision"):
             return dict(round_state["final_decision"])
         self._set_phase(session, "handbook_final_decision")
-        final_decision, event = self._handbook_final_decision(
-            session,
-            target_draw.period,
-            signal_outputs,
-            social_posts,
-            market_ranks,
-            final_plan,
-            leaderboard,
-        )
+        if _phase_group_agent_ids(session, "handbook_final_decision", "decision"):
+            final_decision, event = self._handbook_final_decision(
+                session,
+                target_draw.period,
+                signal_outputs,
+                social_posts,
+                market_ranks,
+                market_synthesis,
+                final_plan,
+                leaderboard,
+            )
+        else:
+            final_decision, event = self._purchase_chair_final_decision(
+                session,
+                target_draw.period,
+                market_synthesis,
+                final_plan,
+            )
         round_state["final_decision"] = final_decision
         if event is not None:
             self._append_events(session, [event])
@@ -628,6 +679,7 @@ class LotteryWorldV2Runtime:
         round_state["status"] = "await_result"
         round_state["updated_at"] = world_now()
         compatibility = dict(round_state.get("compatibility_projection", {}))
+        signal_boards = list(round_state.get("signal_boards") or [serialize_signal_output(item) for item in signal_outputs])
         market_discussion = {
             "social_posts": [item if isinstance(item, dict) else item.to_dict() for item in social_posts],
             "judge_boards": [item if isinstance(item, dict) else item.to_dict() for item in market_ranks],
@@ -638,7 +690,8 @@ class LotteryWorldV2Runtime:
             "date": target_draw.date,
             "visible_through_period": session.get("visible_through_period"),
             "predicted_period": target_draw.period,
-            "generator_boards": [serialize_signal_output(item) for item in signal_outputs],
+            "signal_boards": signal_boards,
+            "generator_boards": signal_boards,
             "market_discussion": market_discussion,
             "purchase_recommendation": dict(final_plan),
             "final_decision": dict(final_decision),
@@ -759,6 +812,8 @@ class LotteryWorldV2Runtime:
         official_numbers = [int(value) for value in final_decision.get("numbers", [])]
         official_alternates = [int(value) for value in final_decision.get("alternate_numbers", [])]
         hedge_pool = [int(value) for value in market_synthesis.get("hedge_pool", [])]
+        expanded_plan = self.game_definition.expand_plan(final_plan, session["pick_size"], _session_max_tickets(session))
+        settlement_result = self.game_definition.settle_plan(actual_draw.numbers, expanded_plan)
         strategy_issue_results = {}
         hits = {}
         for strategy_id, prediction in signals.items():
@@ -775,11 +830,11 @@ class LotteryWorldV2Runtime:
             state = _agent_state_row(session, strategy_id, prediction.display_name, prediction.rationale)
             state["recent_hits"].append(hit_count)
         best_hits = max(hits.values(), default=0)
-        reference_tickets = _plan_tickets(final_plan)
-        reference_cost = int(final_plan.get("total_cost_yuan", 0) or 0)
-        reference_payout = _purchase_payout(reference_tickets, actual_draw.numbers) or 0
-        purchase_profit = reference_payout - reference_cost
-        purchase_roi = round(purchase_profit / reference_cost, 4) if reference_cost else 0.0
+        reference_tickets = list(expanded_plan.tickets)
+        reference_cost = self.game_definition.price_plan(expanded_plan)
+        reference_payout = int(settlement_result.payout_yuan)
+        purchase_profit = int(settlement_result.profit_yuan)
+        purchase_roi = float(settlement_result.roi)
         settlement = {
             "period": actual_draw.period,
             "official_prediction": official_numbers,
@@ -851,6 +906,39 @@ class LotteryWorldV2Runtime:
                 continue
             predictions.update(run_strategy_stage(context, stage_strategies, pick_size, parallelism))
         return predictions
+
+    def _signal_boards(self, issue_id: str, predictions: Mapping[str, Any], history) -> list[SignalBoard]:
+        boards = []
+        for prediction in predictions.values():
+            features = dict(self.game_definition.extract_features(list(prediction.numbers), prediction.group))
+            anti = self.anti_crowding_service.analyze(prediction.numbers, history)
+            structure_key = str((prediction.metadata or {}).get("structure_bias", "tickets")).strip() or "tickets"
+            play_size_key = str((prediction.metadata or {}).get("play_size_bias") or len(prediction.numbers))
+            confidence = max(sum(float(score) for _, score in prediction.ranked_scores[:3]) / 30, 0.2) if prediction.ranked_scores else 0.2
+            boards.append(
+                signal_board_from_prediction(
+                    prediction,
+                    issue_id=issue_id,
+                    game_id=self.game_definition.game_id,
+                    number_scores={int(number): float(score) for number, score in prediction.ranked_scores} or {
+                        int(number): float(len(prediction.numbers) - index)
+                        for index, number in enumerate(prediction.numbers)
+                    },
+                    structure_scores={structure_key: 1.0},
+                    play_size_scores={play_size_key: 1.0},
+                    crowding_penalties=anti.crowding_penalties,
+                    payout_surrogates={**anti.payout_surrogates, **features},
+                    exclusions=list(anti.exclusions),
+                    evidence_refs=list((prediction.metadata or {}).get("sources") or ()),
+                    confidence=confidence,
+                    metadata={
+                        "feature_profile": asdict(self.feature_profile),
+                        "display_name": prediction.display_name,
+                        "group": prediction.group,
+                    },
+                )
+            )
+        return boards
 
     def _context(self, history, target_draw, assets, options, performance, session):
         visible_docs = tuple(grounding_documents(assets.knowledge_documents, target_draw))
@@ -1011,11 +1099,13 @@ class LotteryWorldV2Runtime:
     def _ensure_agents(self, session, strategies, context) -> None:
         if session["agents"]:
             return
+        fabric = self._agent_fabric_registry()
         refs = [_strategy_ref(strategy) for strategy in strategies.values()]
-        refs.extend(_market_role_refs(session))
-        refs.extend(_world_refs())
+        refs.extend(_market_role_refs(session, fabric))
+        refs.extend(_world_refs(fabric))
         session["agents"], session["agent_state"] = [], {}
-        rows = _parallel_results(refs, min(len(refs), 6), lambda ref: self._register_agent_payload(session, ref, context))
+        parallelism = 1 if self._runtime_backend().startswith("letta") else min(len(refs), 6)
+        rows = _parallel_results(refs, parallelism, lambda ref: self._register_agent_payload(session, ref, context))
         events = []
         for agent_row, state_row, event in rows:
             session["agents"].append(agent_row)
@@ -1023,24 +1113,38 @@ class LotteryWorldV2Runtime:
             self._attach_agent_tools(session, agent_row)
             events.append(event)
         session["active_agent_ids"] = [item["session_agent_id"] for item in session["agents"]]
+        self._refresh_execution_bindings(session)
         self._append_events(session, events)
-        self._sync_shared_blocks(session, session["active_agent_ids"])
         self._persist_session(session)
 
     def _register_agent_payload(self, session, ref, context):
         bankroll = ""
         if ref.group in {"purchase", "bettor"}:
             bankroll = f"Budget {session['budget_yuan']} yuan. State tradeoffs and payoff target clearly."
-        prompt_passages = _agent_prompt_passages(ref, context)
-        prompt_docs = _bound_prompt_docs(ref)
+        bundle = self._prompt_asset_bundle(ref, context, session)
+        prompt_passages = list(bundle.passages)
+        prompt_docs = list(bundle.document_names)
+        binding = self._resolve_execution_binding(session, ref.session_agent_id, ref.role_kind, ref.group)
+        metadata = dict(ref.metadata or {})
+        metadata["execution_binding"] = binding.to_dict()
         letta_id = self._create_agent(
             session,
             ref.session_agent_id,
             ref.description,
-            agent_blocks(ref.display_name, ref.description, bankroll),
-            {"group": ref.group, "role_kind": ref.role_kind},
+            _initial_agent_blocks(session, ref.display_name, ref.description, bankroll),
+            {
+                "group": ref.group,
+                "role_kind": ref.role_kind,
+                "session_agent_id": ref.session_agent_id,
+                "execution_binding": binding.to_dict(),
+            },
         )
-        agent_row = {**ref.to_dict(), "letta_agent_id": letta_id}
+        agent_row = {
+            **ref.to_dict(),
+            "letta_agent_id": letta_id,
+            "execution_binding": binding.to_dict(),
+            "metadata": metadata,
+        }
         state_row = {
             "display_name": ref.display_name,
             "persona": ref.description,
@@ -1055,6 +1159,8 @@ class LotteryWorldV2Runtime:
             "last_comment": "",
             "bound_prompt_docs": prompt_docs,
             "bound_prompt_passage_count": len(prompt_passages),
+            "prompt_sources": list(bundle.sources),
+            "execution_binding": binding.to_dict(),
         }
         for text in prompt_passages:
             self._add_passage(session, letta_id, text, ["lottery", "prompt"])
@@ -1071,6 +1177,7 @@ class LotteryWorldV2Runtime:
                 "role_kind": ref.role_kind,
                 "bound_prompt_docs": prompt_docs,
                 "bound_prompt_passage_count": len(prompt_passages),
+                "execution_binding": binding.to_dict(),
             },
         )
         return agent_row, state_row, event
@@ -1096,7 +1203,7 @@ class LotteryWorldV2Runtime:
                     continue
                 self._client(session).attach_tool_to_agent(agent_row["letta_agent_id"], tool_id)
                 attached.add(tool_id)
-        if role_kind in {"social", "judge", "bettor", "purchase", "analyst"} and not attached:
+        if role_kind in {"social", "judge", "purchase", "analyst"} and not attached:
             raise ValueError(
                 f"No MCP tools attached for {agent_row.get('session_agent_id', role_kind)} ({role_kind}/{group})"
             )
@@ -1110,11 +1217,7 @@ class LotteryWorldV2Runtime:
         dialogue_enabled: bool,
         dialogue_rounds: int,
     ) -> list[WorldEvent]:
-        agent_ids = [
-            item["session_agent_id"]
-            for item in session["agents"]
-            if item.get("group") == "social"
-        ]
+        agent_ids = _phase_group_agent_ids(session, "social_propagation", "social")
         if not agent_ids:
             return []
         round_count = max(1, dialogue_rounds if dialogue_enabled else 1)
@@ -1154,11 +1257,13 @@ class LotteryWorldV2Runtime:
         session["progress"]["current_actor_id"] = agent_id
         session["progress"]["current_actor_name"] = agent["display_name"]
         self._persist_session(session)
+        visible_signals = _filter_visible_signal_outputs(session, agent_id, signal_outputs)
+        visible_events = _filter_visible_events(session, agent_id, prior_events)
         strategy_groups = _strategy_group_lookup(session)
         view = build_social_prompt_view(
             agent_id,
-            signal_outputs,
-            prior_events,
+            visible_signals,
+            visible_events,
             performance,
             strategy_groups,
         )
@@ -1170,8 +1275,8 @@ class LotteryWorldV2Runtime:
                 f"Visible leaderboard:\n{view['leaderboard']}",
                 f"Market focus:\n{view['market_focus']}",
                 f"Execution note:\n{view['instruction']}",
-                f"Recent social posts:\n{_recent_phase_summary(prior_events, 'social_propagation')}",
-                f"Recent interviews:\n{_recent_phase_summary(prior_events, 'public_debate')}",
+                f"Recent social posts:\n{_recent_phase_summary(visible_events, 'social_propagation')}",
+                f"Recent interviews:\n{_recent_phase_summary(visible_events, 'public_debate')}",
                 (
                     'Return JSON only: {"comment":"...", "focus":["..."], '
                     '"trusted_strategy_ids":["..."], "highlighted_numbers":[...], '
@@ -1214,11 +1319,7 @@ class LotteryWorldV2Runtime:
         return event
 
     def _judge_boards(self, session, signal_outputs, social_posts, leaderboard, parallelism: int) -> list[WorldEvent]:
-        judge_ids = [
-            item["session_agent_id"]
-            for item in session["agents"]
-            if item.get("group") == "judge"
-        ]
+        judge_ids = _phase_group_agent_ids(session, "market_rerank", "judge")
         if not judge_ids:
             return []
         session["progress"]["dialogue_round_index"] = 1
@@ -1237,15 +1338,18 @@ class LotteryWorldV2Runtime:
         session["progress"]["current_actor_id"] = agent_id
         session["progress"]["current_actor_name"] = agent["display_name"]
         self._persist_session(session)
+        visible_signals = _filter_visible_signal_outputs(session, agent_id, signal_outputs)
+        visible_posts = _filter_visible_events(session, agent_id, social_posts)
         prompt = "\n".join(
             [
                 session["shared_memory"]["current_issue"],
-                f"Signal board:\n{_signal_output_block(signal_outputs)}",
-                f"Social feed:\n{_event_digest_block(social_posts)}",
+                f"Signal board:\n{_signal_output_block(visible_signals)}",
+                f"Social feed:\n{_event_digest_block(visible_posts)}",
                 f"Leaderboard:\n{_performance_block(_leaderboard_performance(leaderboard))}",
                 (
-                    'Return JSON only: {"numbers":[...], "comment":"...", "rationale":"...", '
-                    '"trusted_strategy_ids":["..."], "play_size_bias":<int or null>, '
+                    'Return JSON only: {"candidate_numbers":[...], "comment":"...", "rationale":"...", '
+                    '"trusted_strategy_ids":["..."], "support_signal_ids":["..."], "oppose_signal_ids":["..."], '
+                    '"crowding_alerts":["..."], "play_size_bias":<int or null>, '
                     '"structure_bias":"tickets|wheel|dan_tuo|portfolio"}'
                 ),
             ]
@@ -1256,7 +1360,8 @@ class LotteryWorldV2Runtime:
             self._save_cached_agent_result(session, agent_id, prompt, payload)
         else:
             payload = cached
-        numbers = [int(value) for value in payload.get("numbers", []) if str(value).strip()][:10]
+        raw_numbers = payload.get("candidate_numbers", payload.get("numbers", []))
+        numbers = [int(value) for value in raw_numbers if str(value).strip()][:10]
         _record_agent_activity(session["agent_state"][agent_id], session.get("current_period") or "-", "market_rerank", str(payload.get("rationale", "")).strip(), numbers)
         return self._event(
             session["session_id"],
@@ -1270,6 +1375,9 @@ class LotteryWorldV2Runtime:
             {
                 "group": "judge",
                 "trusted_strategy_ids": payload.get("trusted_strategy_ids", []),
+                "support_signal_ids": payload.get("support_signal_ids", []),
+                "oppose_signal_ids": payload.get("oppose_signal_ids", []),
+                "crowding_alerts": payload.get("crowding_alerts", []),
                 "play_size_bias": payload.get("play_size_bias"),
                 "structure_bias": payload.get("structure_bias", "tickets"),
                 "rationale": str(payload.get("rationale", "")).strip(),
@@ -1388,7 +1496,7 @@ class LotteryWorldV2Runtime:
         raw = self._send_message(session, agent["letta_agent_id"], prompt)
         proposal = _purchase_json(agent_id, raw)
         try:
-            structure = planner_structure(proposal, session["pick_size"], max_tickets)
+            structure = self.game_definition.expand_plan(proposal, session["pick_size"], max_tickets)
             plan = bet_plan_from_payload(agent_id, proposal, structure)
             serialized = serialize_bet_plan(plan, proposal, structure, agent["display_name"])
         except Exception as exc:
@@ -1424,139 +1532,178 @@ class LotteryWorldV2Runtime:
         )
         return serialized, event
 
-    def _synthesize_market(self, session, signal_outputs, social_posts, market_ranks):
-        chair = _agent_by_id(session, "purchase_chair")
+    def _purchase_persona_plans(self, session, period: str, signal_outputs, social_posts, market_ranks, parallelism: int):
+        chair_id = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
+        persona_ids = [item for item in _phase_group_agent_ids(session, "plan_synthesis", "purchase") if item != chair_id]
+        if not persona_ids:
+            return [], {}
+        results = _parallel_results(
+            persona_ids,
+            min(len(persona_ids), max(parallelism, 1)),
+            lambda agent_id: self._purchase_persona_result(session, period, signal_outputs, social_posts, market_ranks, agent_id),
+        )
+        events = []
+        plans = {}
+        for result in results:
+            if not result["ok"]:
+                events.append(_purchase_failure_event(session, period, result["agent_id"], result["display_name"], result["error"]))
+                self._log_execution(session, "warning", "purchase_persona_invalid", f"跳过无效购买人格方案: {result['display_name']}", phase="plan_synthesis", details=[result["error"]])
+                continue
+            plan, event = result["plan"], result["event"]
+            plans[plan["role_id"]] = plan
+            events.append(event)
+        return events, plans
+
+    def _purchase_persona_result(self, session, period: str, signal_outputs, social_posts, market_ranks, agent_id: str):
+        agent = _agent_by_id(session, agent_id)
+        try:
+            plan, event = self._purchase_persona_plan(session, period, signal_outputs, social_posts, market_ranks, agent_id)
+        except Exception as exc:
+            return {"ok": False, "agent_id": agent_id, "display_name": agent["display_name"], "error": str(exc).strip() or exc.__class__.__name__}
+        return {"ok": True, "plan": plan, "event": event}
+
+    def _purchase_persona_plan(self, session, period: str, signal_outputs, social_posts, market_ranks, agent_id: str):
+        agent = _agent_by_id(session, agent_id)
+        visible_signals = _filter_visible_signal_outputs(session, agent_id, signal_outputs)
+        visible_posts = _filter_visible_events(session, agent_id, social_posts)
+        visible_ranks = _filter_visible_events(session, agent_id, market_ranks)
         prompt = "\n".join(
             [
                 session["shared_memory"]["current_issue"],
-                f"Signal board:\n{_signal_output_block(signal_outputs)}",
-                f"Social feed:\n{_event_digest_block(social_posts)}",
-                f"Judge boards:\n{_event_digest_block(market_ranks)}",
+                f"Signal board:\n{_signal_output_block(visible_signals)}",
+                f"Social feed:\n{_event_digest_block(visible_posts)}",
+                f"Judge boards:\n{_event_digest_block(visible_ranks)}",
                 purchase_rule_block(),
                 f"Global budget cap: {_session_budget(session)} yuan.",
                 *_plan_guard_lines(_session_budget(session), _session_max_tickets(session)),
-                "Choose one reference plan for the market and keep it executable under the global budget.",
+                "Return one executable purchase proposal that matches your persona and the current market.",
                 purchase_schema(),
             ]
         )
-        cached = self._load_cached_agent_result(session, "purchase_chair", prompt)
+        cached = self._load_cached_agent_result(session, agent_id, prompt)
         if cached is None:
-            proposal, structure = self._resolve_purchase_chair_plan(
-                session,
-                chair,
-                prompt,
-                phase="plan_synthesis",
-            )
-            plan = bet_plan_from_payload("purchase_chair", proposal, structure)
-            final_plan = serialize_bet_plan(plan, proposal, structure, chair["display_name"])
+            proposal, structure = self._resolve_purchase_plan(session, agent, prompt, phase="plan_synthesis")
+            plan = bet_plan_from_payload(agent_id, proposal, structure)
+            serialized = serialize_bet_plan(plan, proposal, structure, agent["display_name"])
             self._save_cached_agent_result(
                 session,
-                "purchase_chair",
+                agent_id,
                 prompt,
                 {
                     "proposal": proposal,
-                    "final_plan": final_plan,
+                    "serialized_plan": serialized,
                     "rationale": plan.rationale,
                 },
             )
         else:
             proposal = dict(cached["proposal"])
-            structure = planner_structure(proposal, session["pick_size"], _session_max_tickets(session))
-            final_plan = dict(cached["final_plan"])
-            plan = bet_plan_from_payload("purchase_chair", proposal, structure)
-        final_plan.update(
-            {
-                "status": "ready",
-                "period": session.get("current_period"),
-                "game": "Happy 8",
-                "budget_yuan": _session_budget(session),
-                "ticket_cost_yuan": TICKET_COST_YUAN,
-            }
-        )
-        synthesis = market_synthesis_payload(
-            signal_outputs=[serialize_signal_output(item) for item in signal_outputs],
-            social_posts=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in social_posts],
-            judge_boards=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in market_ranks],
-            bet_plans={},
-            reference_plan_id="purchase_chair",
-            reference_plan=final_plan,
-            rationale=plan.rationale,
-        )
+            structure = self.game_definition.expand_plan(
+                proposal,
+                session["pick_size"],
+                _session_max_tickets(session),
+            )
+            serialized = dict(cached["serialized_plan"])
+            plan = bet_plan_from_payload(agent_id, proposal, structure)
+        serialized.update({"status": "ready", "period": period, "game": "Happy 8", "budget_yuan": _session_budget(session), "ticket_cost_yuan": TICKET_COST_YUAN})
+        numbers = reference_leg_payload(serialized)["numbers"]
+        _record_agent_activity(session["agent_state"][agent_id], period, "plan_synthesis", plan.rationale, numbers)
         event = self._event(
-            session["session_id"],
-            session.get("current_period") or "-",
-            "plan_synthesis",
-            "purchase_decision",
-            "purchase_chair",
-            chair["display_name"],
-            plan.rationale,
-            tuple(reference_leg_payload(final_plan)["numbers"]),
-            {
-                "group": "purchase",
-                "plan_type": final_plan.get("plan_type"),
-                "play_size": final_plan.get("play_size"),
-            },
+            session["session_id"], period, "plan_synthesis", "purchase_proposal", agent_id, agent["display_name"], plan.rationale, tuple(numbers),
+            {"group": "purchase", "plan_type": serialized.get("plan_type"), "play_size": serialized.get("play_size"), "risk_exposure": serialized.get("risk_exposure"), "planner_role": agent.get("metadata", {}).get("planner_role")},
         )
-        _record_agent_activity(
-            session["agent_state"]["purchase_chair"],
-            session.get("current_period") or "-",
-            "plan_synthesis",
-            plan.rationale,
-            reference_leg_payload(final_plan)["numbers"],
-        )
-        return synthesis, final_plan, event
+        return serialized, event
 
-    def _handbook_final_decision(
-        self,
-        session,
-        period: str,
-        signal_outputs,
-        social_posts,
-        market_ranks,
-        final_plan,
-        leaderboard,
-    ) -> tuple[dict[str, Any], WorldEvent]:
-        agent = _agent_by_id(session, "handbook_decider")
+    def _synthesize_market(self, session, signal_outputs, social_posts, market_ranks, parallelism: int):
+        chair_id = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
+        chair = _agent_by_id(session, chair_id)
+        period = session.get("current_period") or "-"
+        persona_events, persona_plans = self._purchase_persona_plans(session, period, signal_outputs, social_posts, market_ranks, parallelism)
+        visible_signals = _filter_visible_signal_outputs(session, chair_id, signal_outputs)
+        visible_posts = _filter_visible_events(session, chair_id, social_posts)
+        visible_ranks = _filter_visible_events(session, chair_id, market_ranks)
         prompt = "\n".join(
             [
                 session["shared_memory"]["current_issue"],
-                f"Target issue: {period}",
-                f"Generator boards:\n{_signal_output_block(signal_outputs)}",
-                f"Social feed:\n{_event_digest_block(social_posts)}",
-                f"Judge boards:\n{_event_digest_block(market_ranks)}",
-                f"Purchase recommendation:\n{_purchase_recommendation_block(final_plan)}",
-                f"Leaderboard:\n{_performance_block(_leaderboard_performance(leaderboard))}",
-                f"Recent review:\n{_review_block(session.get('latest_review', {}))}",
-                (
-                    'Return JSON only: {"numbers":[...], "alternate_numbers":[...], '
-                    '"trusted_strategy_ids":["..."], "adopted_groups":["..."], '
-                    '"accepted_purchase_recommendation":true, "rationale":"...", "risk_note":"..."}'
-                ),
+                f"Signal board:\n{_signal_output_block(visible_signals)}",
+                f"Social feed:\n{_event_digest_block(visible_posts)}",
+                f"Judge boards:\n{_event_digest_block(visible_ranks)}",
+                f"Purchase persona proposals:\n{_bet_plan_block(persona_plans)}",
+                purchase_rule_block(),
+                f"Global budget cap: {_session_budget(session)} yuan.",
+                *_plan_guard_lines(_session_budget(session), _session_max_tickets(session)),
+                "Choose the best reference plan for the market. Reuse a persona plan when it is already strong; otherwise return a corrected synthesis.",
+                purchase_schema(),
             ]
         )
-        cached = self._load_cached_agent_result(session, "handbook_decider", prompt)
+        cached = self._load_cached_agent_result(session, chair_id, prompt)
         if cached is None:
-            payload = parse_json_response(self._send_message(session, agent["letta_agent_id"], prompt))
-            self._save_cached_agent_result(session, "handbook_decider", prompt, payload)
+            proposal, structure = self._resolve_purchase_plan(session, chair, prompt, phase="plan_synthesis")
+            plan = bet_plan_from_payload(chair_id, proposal, structure)
+            final_plan = serialize_bet_plan(plan, proposal, structure, chair["display_name"])
+            self._save_cached_agent_result(session, chair_id, prompt, {"proposal": proposal, "final_plan": final_plan, "rationale": plan.rationale})
         else:
-            payload = cached
-        numbers = [int(value) for value in payload.get("numbers", []) if str(value).strip()][: session["pick_size"]]
+            proposal = dict(cached["proposal"])
+            structure = self.game_definition.expand_plan(proposal, session["pick_size"], _session_max_tickets(session))
+            final_plan = dict(cached["final_plan"])
+            plan = bet_plan_from_payload(chair_id, proposal, structure)
+        reference_plan_id = _matching_purchase_plan_id(persona_plans, final_plan, chair_id)
+        final_plan.update({"status": "ready", "period": period, "game": "Happy 8", "budget_yuan": _session_budget(session), "ticket_cost_yuan": TICKET_COST_YUAN, "reference_plan_id": reference_plan_id, "persona_plan_count": len(persona_plans)})
+        synthesis = market_synthesis_payload(
+            signal_outputs=[serialize_signal_output(item) for item in visible_signals],
+            social_posts=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in visible_posts],
+            judge_boards=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in visible_ranks],
+            bet_plans=persona_plans,
+            reference_plan_id=reference_plan_id,
+            reference_plan=final_plan,
+            rationale=plan.rationale,
+        )
+        numbers = reference_leg_payload(final_plan)["numbers"]
+        event = self._event(
+            session["session_id"], period, "plan_synthesis", "purchase_decision", chair_id, chair["display_name"], plan.rationale, tuple(numbers),
+            {"group": "purchase", "plan_type": final_plan.get("plan_type"), "play_size": final_plan.get("play_size"), "reference_plan_id": reference_plan_id, "persona_plan_count": len(persona_plans)},
+        )
+        _record_agent_activity(session["agent_state"][chair_id], period, "plan_synthesis", plan.rationale, numbers)
+        return synthesis, final_plan, [*persona_events, event]
+
+    def _purchase_chair_final_decision(
+        self,
+        session,
+        period: str,
+        market_synthesis,
+        final_plan,
+    ) -> tuple[dict[str, Any], WorldEvent]:
+        chair_id = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
+        chair = _agent_by_id(session, chair_id)
+        numbers = _purchase_final_numbers(market_synthesis, final_plan, session["pick_size"])
         if len(numbers) != session["pick_size"]:
-            raise ValueError(f"handbook_decider returned invalid official numbers: {payload}")
-        alternates = [int(value) for value in payload.get("alternate_numbers", []) if str(value).strip()][:3]
+            raise ValueError(f"{chair_id} produced invalid final reference numbers: {final_plan}")
+        hedge_pool = [int(value) for value in market_synthesis.get("hedge_pool", []) if str(value).strip()]
+        alternates = ensure_alternate_numbers(numbers, hedge_pool)
+        anti = self.anti_crowding_service.analyze(numbers, ())
+        trusted_strategy_ids = [
+            str(value) for value in market_synthesis.get("trusted_strategy_ids", []) if str(value).strip()
+        ]
+        adopted_groups = _adopted_groups(session, trusted_strategy_ids)
+        rationale = str(final_plan.get("rationale", "")).strip() or str(market_synthesis.get("rationale", "")).strip()
         final_decision = {
             "period": period,
             "numbers": numbers,
             "alternate_numbers": alternates,
-            "trusted_strategy_ids": [str(value) for value in payload.get("trusted_strategy_ids", []) if str(value).strip()],
-            "adopted_groups": [str(value) for value in payload.get("adopted_groups", []) if str(value).strip()],
-            "accepted_purchase_recommendation": bool(payload.get("accepted_purchase_recommendation", False)),
-            "rationale": str(payload.get("rationale", "")).strip(),
-            "risk_note": str(payload.get("risk_note", "")).strip(),
-            "purchase_reference_numbers": reference_leg_payload(final_plan)["numbers"],
+            "trusted_strategy_ids": trusted_strategy_ids,
+            "adopted_groups": adopted_groups,
+            "accepted_purchase_recommendation": True,
+            "rationale": rationale,
+            "risk_note": "",
+            "purchase_reference_numbers": list(numbers),
+            "decision_owner": chair_id,
+            "decision_owner_name": chair["display_name"],
+            "decision_owner_group": "purchase",
+            "decision_weights": {},
+            "anti_crowding": dict(anti.crowding_penalties),
+            "payout_surrogates": dict(anti.payout_surrogates),
         }
         _record_agent_activity(
-            session["agent_state"]["handbook_decider"],
+            session["agent_state"][chair_id],
             period,
             "handbook_final_decision",
             final_decision["rationale"],
@@ -1567,7 +1714,106 @@ class LotteryWorldV2Runtime:
             period,
             "handbook_final_decision",
             "official_prediction",
-            "handbook_decider",
+            chair_id,
+            chair["display_name"],
+            final_decision["rationale"],
+            tuple(numbers),
+            {
+                "group": "purchase",
+                "alternate_numbers": alternates,
+                "trusted_strategy_ids": trusted_strategy_ids,
+                "adopted_groups": adopted_groups,
+                "accepted_purchase_recommendation": True,
+                "risk_note": "",
+            },
+        )
+        return final_decision, event
+
+    def _handbook_final_decision(
+        self,
+        session,
+        period: str,
+        signal_outputs,
+        social_posts,
+        market_ranks,
+        market_synthesis,
+        final_plan,
+        leaderboard,
+    ) -> tuple[dict[str, Any], WorldEvent]:
+        agent_id = _phase_agent_id(session, "handbook_final_decision", "decision", "handbook_decider")
+        agent = _agent_by_id(session, agent_id)
+        visible_signals = _filter_visible_signal_outputs(session, agent_id, signal_outputs)
+        visible_posts = _filter_visible_events(session, agent_id, social_posts)
+        visible_ranks = _filter_visible_events(session, agent_id, market_ranks)
+        weights = self.execution_registry.decision_weights() or {
+            "draw_signal": 1.0,
+            "anti_crowding": 1.4,
+            "payout_surrogate": 1.2,
+            "pattern_risk": 1.1,
+        }
+        purchase_snapshot = reference_leg_payload(final_plan)["numbers"]
+        purchase_crowding = self.anti_crowding_service.analyze(purchase_snapshot, ())
+        prompt = "\n".join(
+            [
+                session["shared_memory"]["current_issue"],
+                f"Target issue: {period}",
+                f"Generator boards:\n{_signal_output_block(visible_signals)}",
+                f"Social feed:\n{_event_digest_block(visible_posts)}",
+                f"Judge boards:\n{_event_digest_block(visible_ranks)}",
+                f"Purchase persona plans:\n{_bet_plan_block(dict(market_synthesis.get('bet_plans', {})))}",
+                f"Purchase recommendation:\n{_purchase_recommendation_block(final_plan)}",
+                f"Decision weights:\n{json.dumps(weights, ensure_ascii=False)}",
+                f"Purchase crowding snapshot:\n{json.dumps({'crowding_penalties': purchase_crowding.crowding_penalties, 'payout_surrogates': purchase_crowding.payout_surrogates}, ensure_ascii=False)}",
+                f"Leaderboard:\n{_performance_block(_leaderboard_performance(leaderboard))}",
+                f"Recent review:\n{_review_block(session.get('latest_review', {}))}",
+                (
+                    'Return JSON only: {"numbers":[...], "alternate_numbers":[...], '
+                    '"trusted_strategy_ids":["..."], "adopted_groups":["..."], '
+                    '"accepted_purchase_recommendation":true, "rationale":"...", "risk_note":"..."}'
+                ),
+            ]
+        )
+        cached = self._load_cached_agent_result(session, agent_id, prompt)
+        if cached is None:
+            payload = parse_json_response(self._send_message(session, agent["letta_agent_id"], prompt))
+            self._save_cached_agent_result(session, agent_id, prompt, payload)
+        else:
+            payload = cached
+        numbers = [int(value) for value in payload.get("numbers", []) if str(value).strip()][: session["pick_size"]]
+        if len(numbers) != session["pick_size"]:
+            raise ValueError(f"{agent_id} returned invalid official numbers: {payload}")
+        alternates = [int(value) for value in payload.get("alternate_numbers", []) if str(value).strip()][:3]
+        anti = self.anti_crowding_service.analyze(numbers, ())
+        final_decision = {
+            "period": period,
+            "numbers": numbers,
+            "alternate_numbers": alternates,
+            "trusted_strategy_ids": [str(value) for value in payload.get("trusted_strategy_ids", []) if str(value).strip()],
+            "adopted_groups": [str(value) for value in payload.get("adopted_groups", []) if str(value).strip()],
+            "accepted_purchase_recommendation": bool(payload.get("accepted_purchase_recommendation", False)),
+            "rationale": str(payload.get("rationale", "")).strip(),
+            "risk_note": str(payload.get("risk_note", "")).strip(),
+            "purchase_reference_numbers": reference_leg_payload(final_plan)["numbers"],
+            "decision_owner": agent_id,
+            "decision_owner_name": agent["display_name"],
+            "decision_owner_group": "decision",
+            "decision_weights": weights,
+            "anti_crowding": dict(anti.crowding_penalties),
+            "payout_surrogates": dict(anti.payout_surrogates),
+        }
+        _record_agent_activity(
+            session["agent_state"][agent_id],
+            period,
+            "handbook_final_decision",
+            final_decision["rationale"],
+            final_decision["numbers"],
+        )
+        event = self._event(
+            session["session_id"],
+            period,
+            "handbook_final_decision",
+            "official_prediction",
+            agent_id,
             agent["display_name"],
             final_decision["rationale"],
             tuple(numbers),
@@ -1582,22 +1828,23 @@ class LotteryWorldV2Runtime:
         )
         return final_decision, event
 
-    def _resolve_purchase_chair_plan(self, session, chair, prompt: str, *, phase: str):
+    def _resolve_purchase_plan(self, session, agent_row, prompt: str, *, phase: str):
+        chair_id = str(agent_row.get("session_agent_id", "purchase_chair")).strip() or "purchase_chair"
         raw = ""
         last_error = None
         for attempt in range(1, PURCHASE_PLAN_REPAIR_ATTEMPTS + 1):
             request_prompt = prompt if attempt == 1 else _purchase_repair_prompt(prompt, raw, last_error)
-            raw = self._send_message(session, chair["letta_agent_id"], request_prompt)
+            raw = self._send_message(session, agent_row["letta_agent_id"], request_prompt)
             try:
-                proposal = _purchase_json("purchase_chair", raw)
-                structure = planner_structure(proposal, session["pick_size"], _session_max_tickets(session))
+                proposal = _purchase_json(chair_id, raw)
+                structure = self.game_definition.expand_plan(proposal, session["pick_size"], _session_max_tickets(session))
             except Exception as exc:
                 last_error = exc
                 self._log_execution(
                     session,
                     "warning",
                     "purchase_plan_invalid_attempt",
-                    f"purchase_chair plan validation failed (attempt {attempt}/{PURCHASE_PLAN_REPAIR_ATTEMPTS})",
+                    f"{chair_id} plan validation failed (attempt {attempt}/{PURCHASE_PLAN_REPAIR_ATTEMPTS})",
                     phase=phase,
                     details=_purchase_validation_details(exc, raw),
                 )
@@ -1607,11 +1854,14 @@ class LotteryWorldV2Runtime:
                     session,
                     "info",
                     "purchase_plan_repaired",
-                    "purchase_chair returned a corrected executable plan after validation feedback.",
+                    f"{chair_id} returned a corrected executable plan after validation feedback.",
                     phase=phase,
                 )
             return proposal, structure
-        raise ValueError(f"purchase_chair returned invalid purchase plan: {raw}") from last_error
+        raise ValueError(f"{chair_id} returned invalid purchase plan: {raw}") from last_error
+
+    def _resolve_purchase_chair_plan(self, session, chair, prompt: str, *, phase: str):
+        return self._resolve_purchase_plan(session, chair, prompt, phase=phase)
 
     def _update_shared_memory(self, session, context, predictions, performance) -> None:
         shared = session["shared_memory"]
@@ -1736,7 +1986,9 @@ class LotteryWorldV2Runtime:
             if allowed and agent["session_agent_id"] not in allowed:
                 continue
             agent_cache = cache.setdefault(agent["session_agent_id"], {})
-            for label in SHARED_BLOCKS:
+            for label in _agent_shared_block_keys(agent):
+                if label not in session["shared_memory"]:
+                    continue
                 value = session["shared_memory"][label]
                 if agent_cache.get(label) == value:
                     continue
@@ -2205,7 +2457,7 @@ class LotteryWorldV2Runtime:
                 options.retry_backoff_ms,
                 options.parallelism,
                 options.issue_parallelism,
-                True,
+                options.agent_dialogue_enabled,
                 options.agent_dialogue_rounds,
                 "embedded_world_context",
                 None,
@@ -2213,11 +2465,13 @@ class LotteryWorldV2Runtime:
             | {
                 "runtime_mode": options.runtime_mode,
                 "world_mode": "persistent",
+                "game_id": session.get("game_id", self.game_definition.game_id),
                 "target_period": latest_target.period,
                 "visible_through_period": session.get("visible_through_period"),
                 "live_interview_enabled": options.live_interview_enabled,
                 "budget_yuan": options.budget_yuan,
                 "world_session_id": session["session_id"],
+                "execution_overrides": session.get("execution_overrides", {}),
             },
             "process_trace": _process_trace(session),
             "execution_log": list(session.get("execution_log", [])),
@@ -2230,10 +2484,14 @@ class LotteryWorldV2Runtime:
                 "current_phase": session["current_phase"],
                 "current_period": session.get("current_period"),
                 "llm_model_name": session.get("llm_model_name"),
+                "game_id": session.get("game_id", self.game_definition.game_id),
                 "active_agent_ids": session.get("active_agent_ids", []),
                 "shared_memory": session["shared_memory"],
                 "agents": session["agents"],
                 "agent_state": session.get("agent_state", {}),
+                "execution_overrides_snapshot": session.get("execution_overrides", {}),
+                "resolved_execution_bindings": session.get("resolved_execution_bindings", {}),
+                "feature_profile": session.get("feature_profile", {}),
                 "progress": session.get("progress", {}),
                 "request_metrics": session.get("request_metrics", {}),
                 "latest_issue_summary": session.get("latest_issue_summary", {}),
@@ -2275,7 +2533,8 @@ class LotteryWorldV2Runtime:
             "date": latest.get("date"),
             "visible_through_period": latest.get("visible_through_period"),
             "predicted_period": latest.get("predicted_period", latest.get("period")),
-            "generator_boards": list(latest.get("generator_boards", latest.get("signal_outputs", []))),
+            "signal_boards": list(latest.get("signal_boards", latest.get("generator_boards", latest.get("signal_outputs", [])))),
+            "generator_boards": list(latest.get("generator_boards", latest.get("signal_boards", latest.get("signal_outputs", [])))),
             "market_discussion": dict(latest.get("market_discussion", {})),
             "purchase_recommendation": dict(latest.get("purchase_recommendation", latest.get("purchase_plan", {}))),
             "final_decision": dict(latest.get("final_decision", {})),
@@ -2343,6 +2602,7 @@ class LotteryWorldV2Runtime:
         model_name: str | None,
         budget_yuan: int,
         session_id: str | None = None,
+        execution_overrides: Mapping[str, Any] | None = None,
     ):
         session = WorldSession.create(
             WORLD_V1_RUNTIME_MODE,
@@ -2351,6 +2611,7 @@ class LotteryWorldV2Runtime:
             list(strategies.keys()),
             "尽量中奖，并保留可解释的社交世界决策过程。",
             model_name,
+            self.game_definition.game_id,
             session_id,
         ).to_dict()
         session["status"] = "idle"
@@ -2381,6 +2642,10 @@ class LotteryWorldV2Runtime:
         session["latest_issue_summary"] = {}
         session["asset_manifest"] = []
         session["shared_memory"] = initial_shared_memory(budget_yuan)
+        session["game_id"] = self.game_definition.game_id
+        session["execution_overrides"] = self.execution_registry.normalize_overrides(execution_overrides)
+        session["resolved_execution_bindings"] = {}
+        session["feature_profile"] = asdict(self.feature_profile)
         session["failed_phase"] = None
         session["last_success_phase"] = None
         session["error"] = None
@@ -2389,6 +2654,93 @@ class LotteryWorldV2Runtime:
 
     def _persist_session(self, session) -> None:
         self.store.save_session(_session_dataclass(session))
+
+    def _apply_execution_overrides(
+        self,
+        session: dict[str, Any],
+        overrides: Mapping[str, Any] | None,
+    ) -> None:
+        normalized = self.execution_registry.normalize_overrides(overrides)
+        session["execution_overrides"] = normalized
+        session["game_id"] = self.game_definition.game_id
+        session["feature_profile"] = asdict(self.feature_profile)
+        self._refresh_execution_bindings(session)
+        self._persist_session(session)
+
+    def _refresh_execution_bindings(self, session: dict[str, Any]) -> None:
+        resolved = {}
+        for agent in session.get("agents", []):
+            binding = self._resolve_execution_binding(
+                session,
+                str(agent.get("session_agent_id", "")).strip(),
+                str(agent.get("role_kind", "generator")).strip(),
+                str(agent.get("group", "")).strip() or None,
+            )
+            binding_payload = binding.to_dict()
+            agent["execution_binding"] = binding_payload
+            metadata = dict(agent.get("metadata") or {})
+            metadata["execution_binding"] = binding_payload
+            agent["metadata"] = metadata
+            state = session.get("agent_state", {}).get(agent.get("session_agent_id"))
+            if isinstance(state, dict):
+                state["execution_binding"] = binding_payload
+            resolved[str(agent.get("session_agent_id"))] = binding_payload
+        session["resolved_execution_bindings"] = resolved
+
+    def _resolve_execution_binding(
+        self,
+        session: Mapping[str, Any],
+        agent_id: str,
+        role_kind: str,
+        group: str | None,
+    ):
+        routing_mode = "active" if self._local_no_mcp_mode() else "metadata_only"
+        fabric_overrides = self._agent_fabric_registry().execution_overrides()
+        session_overrides = self.execution_registry.normalize_overrides(session.get("execution_overrides"))
+        fabric_agent_overrides = dict(fabric_overrides.get("agent_overrides") or {})
+        session_group_overrides = dict(session_overrides.get("group_overrides") or {})
+        session_agent_overrides = dict(session_overrides.get("agent_overrides") or {})
+        if group and group in session_group_overrides and agent_id not in session_agent_overrides:
+            fabric_agent_overrides.pop(agent_id, None)
+        merged_overrides = {
+            "group_overrides": {
+                **dict(fabric_overrides.get("group_overrides") or {}),
+                **session_group_overrides,
+            },
+            "agent_overrides": {
+                **fabric_agent_overrides,
+                **session_agent_overrides,
+            },
+        }
+        return self.execution_registry.resolve_binding(
+            agent_id,
+            role_kind or "generator",
+            group,
+            merged_overrides,
+            routing_mode=routing_mode,
+        )
+
+    def _agent_fabric_registry(self) -> AgentFabricRegistry:
+        return AgentFabricRegistry(execution_registry=self.execution_registry)
+
+    def _prompt_asset_bundle(self, ref: WorldAgentRef, context, session) -> PromptAssetBundle:
+        metadata = dict(ref.metadata or {})
+        if metadata.get("agent_fabric"):
+            documents = {
+                str(getattr(item, "name", "")).strip(): item
+                for item in [*(getattr(context, "prompt_documents", ()) or ()), *(getattr(context, "knowledge_documents", ()) or ())]
+                if str(getattr(item, "name", "")).strip()
+            }
+            return self._agent_fabric_registry().prompt_assets(
+                ref.session_agent_id,
+                tuple(documents.values()),
+                session.get("shared_memory", {}),
+            )
+        return PromptAssetBundle(
+            tuple(_agent_prompt_passages(ref, context)),
+            tuple(_bound_prompt_docs(ref)),
+            (),
+        )
 
     def _log_execution(
         self,
@@ -2424,6 +2776,7 @@ class LotteryWorldV2Runtime:
         model_name: str | None,
         budget_yuan: int,
         session_id: str | None = None,
+        execution_overrides: Mapping[str, Any] | None = None,
     ):
         session = WorldSession.create(
             WORLD_V2_MARKET_RUNTIME_MODE,
@@ -2432,6 +2785,7 @@ class LotteryWorldV2Runtime:
             list(strategies.keys()),
             "尽量中奖，并保留可解释的社交世界决策过程。",
             model_name,
+            self.game_definition.game_id,
             session_id,
         ).to_dict()
         session["status"] = "idle"
@@ -2463,6 +2817,10 @@ class LotteryWorldV2Runtime:
         session["asset_manifest"] = []
         session["execution_log"] = []
         session["shared_memory"] = initial_shared_memory(budget_yuan)
+        session["game_id"] = self.game_definition.game_id
+        session["execution_overrides"] = self.execution_registry.normalize_overrides(execution_overrides)
+        session["resolved_execution_bindings"] = {}
+        session["feature_profile"] = asdict(self.feature_profile)
         session["agent_block_schema_version"] = AGENT_BLOCK_SCHEMA_VERSION
         session["failed_phase"] = None
         session["last_success_phase"] = None
@@ -2703,10 +3061,12 @@ def _visible_history_hash(completed_draws) -> str:
 def _runtime_config_hash(session, options) -> str:
     payload = {
         "runtime_mode": session.get("runtime_mode"),
+        "game_id": session.get("game_id"),
         "llm_model_name": session.get("llm_model_name"),
         "pick_size": session.get("pick_size"),
         "budget_yuan": session.get("budget_yuan"),
         "selected_strategy_ids": list(session.get("selected_strategy_ids", [])),
+        "execution_overrides": dict(session.get("execution_overrides", {})),
         "agent_dialogue_enabled": bool(getattr(options, "agent_dialogue_enabled", False)),
         "agent_dialogue_rounds": int(getattr(options, "agent_dialogue_rounds", 0) or 0),
         "live_interview_enabled": bool(getattr(options, "live_interview_enabled", False)),
@@ -2720,6 +3080,7 @@ def _runtime_config_hash(session, options) -> str:
 def _round_runtime_config(session, options) -> dict[str, Any]:
     return {
         "runtime_mode": str(session.get("runtime_mode", "")).strip(),
+        "game_id": str(session.get("game_id", "happy8")).strip(),
         "llm_model_name": str(session.get("llm_model_name") or getattr(options, "model_name", "") or "").strip(),
         "pick_size": int(session.get("pick_size", 0) or 0),
         "budget_yuan": int(session.get("budget_yuan", DEFAULT_BUDGET_YUAN) or DEFAULT_BUDGET_YUAN),
@@ -2728,6 +3089,7 @@ def _round_runtime_config(session, options) -> dict[str, Any]:
         "live_interview_enabled": bool(getattr(options, "live_interview_enabled", False)),
         "parallelism": int(getattr(options, "parallelism", 0) or 0),
         "issue_parallelism": int(getattr(options, "issue_parallelism", 0) or 0),
+        "execution_overrides": dict(session.get("execution_overrides", {})),
     }
 
 
@@ -2738,6 +3100,9 @@ def _participant_agents_snapshot(session) -> list[dict[str, str]]:
             "display_name": str(item.get("display_name", "")).strip(),
             "group": str(item.get("group", "")).strip(),
             "role_kind": str(item.get("role_kind", "")).strip(),
+            "profile_id": str(dict(item.get("execution_binding") or {}).get("profile_id", "")).strip(),
+            "provider_id": str(dict(item.get("execution_binding") or {}).get("provider_id", "")).strip(),
+            "model_id": str(dict(item.get("execution_binding") or {}).get("model_id", "")).strip(),
         }
         for item in session.get("agents", [])
     ]
@@ -2830,6 +3195,9 @@ def _final_decision_constraints_block(session, target_period: str) -> str:
     visible = str(session.get("visible_through_period") or "-").strip()
     budget = int(session.get("budget_yuan", DEFAULT_BUDGET_YUAN))
     pick_size = int(session.get("pick_size", 5))
+    purchase_owner = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
+    decision_agents = _phase_group_agent_ids(session, "handbook_final_decision", "decision")
+    final_owner = decision_agents[0] if decision_agents else purchase_owner
     return "\n".join(
         [
             f"- visible_through_period={visible}",
@@ -2837,8 +3205,8 @@ def _final_decision_constraints_block(session, target_period: str) -> str:
             f"- official_pick_size={pick_size}",
             "- alternate_numbers_max=3",
             f"- purchase_budget_yuan={budget}",
-            "- official_final_decision_owner=handbook_decider",
-            "- purchase_recommendation_owner=purchase_chair",
+            f"- official_final_decision_owner={final_owner}",
+            f"- purchase_recommendation_owner={purchase_owner}",
             "- never leak actual numbers for the target issue before settlement",
             "- only use currently visible history and current shared boards",
         ]
@@ -2855,61 +3223,63 @@ def _period_already_settled(session, period: str) -> bool:
 
 def _strategy_ref(strategy) -> WorldAgentRef:
     return WorldAgentRef(
-        strategy.strategy_id,
-        strategy.display_name,
-        "strategy",
-        strategy.group,
-        "-",
-        strategy.strategy_id,
-        strategy.description,
-        {"kind": strategy.kind, "uses_llm": bool(getattr(strategy, "uses_llm", False))},
+        session_agent_id=strategy.strategy_id,
+        display_name=strategy.display_name,
+        role_kind="strategy",
+        group=strategy.group,
+        letta_agent_id="-",
+        strategy_id=strategy.strategy_id,
+        description=strategy.description,
+        metadata={"kind": strategy.kind, "uses_llm": bool(getattr(strategy, "uses_llm", False))},
     )
 
 
-def _world_refs() -> list[WorldAgentRef]:
+def _world_refs(fabric: AgentFabricRegistry) -> list[WorldAgentRef]:
     refs = []
-    for role_id, display_name, role_kind, group, description in WORLD_ROLES:
-        metadata = {}
-        if role_id == "purchase_chair":
-            metadata = handbook_role_metadata(
-                "Use the handbook as purchase doctrine, but remain executable under the current budget."
+    for spec in fabric.world_role_specs():
+        refs.append(
+            WorldAgentRef(
+                session_agent_id=spec.agent_id,
+                display_name=spec.display_name,
+                role_kind=spec.role_kind,
+                group=spec.group,
+                letta_agent_id="-",
+                strategy_id=None,
+                description=spec.description,
+                metadata={
+                    "kind": "llm",
+                    "uses_llm": True,
+                    "behavior_template": spec.behavior_template,
+                    "agent_fabric": spec.to_dict(),
+                },
             )
-        if role_id == "handbook_decider":
-            metadata = handbook_role_metadata(
-                "You are the only official final decider. Read every board before publishing the official prediction."
-            )
-        refs.append(WorldAgentRef(role_id, display_name, role_kind, group, "-", None, description, metadata))
+        )
     return refs
 
 
-def _market_role_refs(session) -> list[WorldAgentRef]:
+def _market_role_refs(session, fabric: AgentFabricRegistry) -> list[WorldAgentRef]:
     strategy_ids = set(session.get("selected_strategy_ids", []))
-    catalog = build_market_v2_catalog()
     refs = []
-    for strategy in catalog.values():
-        if getattr(strategy, "strategy_id", None) in strategy_ids:
+    for spec in (fabric.resolved_agent(agent_id) for agent_id in sorted(fabric.agents())):
+        if spec.agent_id in strategy_ids:
             continue
-        if getattr(strategy, "group", "") not in {"social", "judge"}:
+        if spec.role_kind not in {"social", "judge"}:
             continue
-        metadata = {
-            "kind": getattr(strategy, "kind", "llm"),
-            "uses_llm": bool(getattr(strategy, "uses_llm", False)),
-        }
-        metadata.update(
-            handbook_role_metadata(
-                "Read the handbook as discussion doctrine, but do not claim final authority."
-            )
-        )
         refs.append(
             WorldAgentRef(
-                strategy.strategy_id,
-                strategy.display_name,
-                getattr(strategy, "group", "strategy"),
-                getattr(strategy, "group", "-"),
-                "-",
-                strategy.strategy_id,
-                strategy.description,
-                metadata,
+                session_agent_id=spec.agent_id,
+                display_name=spec.display_name,
+                role_kind=spec.role_kind,
+                group=spec.group,
+                letta_agent_id="-",
+                strategy_id=spec.agent_id,
+                description=spec.description,
+                metadata={
+                    "kind": "llm",
+                    "uses_llm": True,
+                    "behavior_template": spec.behavior_template,
+                    "agent_fabric": spec.to_dict(),
+                },
             )
         )
     return refs
@@ -2940,6 +3310,48 @@ def _strategy_group_lookup(session) -> dict[str, str]:
         for item in session.get("agents", [])
         if item.get("role_kind") == "strategy"
     }
+
+
+def _adopted_groups(session, trusted_strategy_ids: Iterable[str]) -> list[str]:
+    strategy_groups = _strategy_group_lookup(session)
+    rows = []
+    seen = set()
+    for strategy_id in trusted_strategy_ids:
+        group = str(strategy_groups.get(strategy_id, "")).strip()
+        if not group or group in seen:
+            continue
+        seen.add(group)
+        rows.append(group)
+    return rows
+
+
+def _purchase_final_numbers(
+    market_synthesis: Mapping[str, Any],
+    final_plan: Mapping[str, Any],
+    pick_size: int,
+) -> list[int]:
+    rows = []
+    for value in reference_leg_payload(final_plan)["numbers"]:
+        number = int(value)
+        if number not in rows:
+            rows.append(number)
+    for item in market_synthesis.get("consensus_number_scores", []):
+        if not isinstance(item, Mapping):
+            continue
+        number = int(item.get("number", 0) or 0)
+        if number <= 0 or number in rows:
+            continue
+        rows.append(number)
+        if len(rows) >= pick_size:
+            return rows[:pick_size]
+    for value in market_synthesis.get("hedge_pool", []):
+        number = int(value)
+        if number in rows:
+            continue
+        rows.append(number)
+        if len(rows) >= pick_size:
+            break
+    return rows[:pick_size]
 
 
 def _grouped_generator_strategies(strategies: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -3003,12 +3415,13 @@ def _session_compatible(session: dict[str, Any], strategies: dict[str, object]) 
         return False
     strategy_ids = set(strategies.keys())
     chosen = {str(item) for item in session.get("selected_strategy_ids", [])}
-    if not chosen.issubset(strategy_ids):
+    if chosen != strategy_ids:
         return False
+    fabric = AgentFabricRegistry()
     allowed = (
         strategy_ids
-        | {ref.session_agent_id for ref in _world_refs()}
-        | {ref.session_agent_id for ref in _market_role_refs(session)}
+        | {ref.session_agent_id for ref in _world_refs(fabric)}
+        | {ref.session_agent_id for ref in _market_role_refs(session, fabric)}
     )
     return all(str(item.get("session_agent_id", "")).strip() in allowed for item in session.get("agents", []))
 
@@ -3234,6 +3647,9 @@ def _bettor_prompt_assets(agent_row: dict[str, Any], session) -> str:
 
 
 def _bound_prompt_docs(ref: WorldAgentRef) -> list[str]:
+    fabric = _fabric_agent_spec(getattr(ref, "metadata", {}))
+    if fabric:
+        return [str(item) for item in fabric.get("document_refs", []) if str(item).strip()]
     raw = (ref.metadata or {}).get("prompt_document_names")
     if not isinstance(raw, (list, tuple)):
         return []
@@ -3254,6 +3670,87 @@ def _agent_prompt_passages(ref: WorldAgentRef, context) -> list[str]:
     if not bool((ref.metadata or {}).get("uses_llm", False)):
         return []
     return prompt_passages(context)
+
+
+def _agent_shared_block_keys(agent_row: Mapping[str, Any]) -> tuple[str, ...]:
+    fabric = _fabric_agent_spec(agent_row.get("metadata"))
+    if not fabric:
+        return SHARED_BLOCKS
+    rows = [str(item).strip() for item in fabric.get("shared_memory_keys", []) if str(item).strip()]
+    return tuple(rows) or SHARED_BLOCKS
+
+
+def _phase_group_agent_ids(session, phase_id: str, group: str) -> list[str]:
+    rows = []
+    for agent in session.get("agents", []):
+        if str(agent.get("group", "")).strip() != group:
+            continue
+        fabric = _fabric_agent_spec(agent.get("metadata"))
+        phases = [str(item).strip() for item in (fabric or {}).get("phases", []) if str(item).strip()]
+        if phases and phase_id not in phases:
+            continue
+        rows.append(str(agent.get("session_agent_id", "")).strip())
+    return [item for item in rows if item]
+
+
+def _phase_agent_id(session, phase_id: str, group: str, fallback: str) -> str:
+    rows = _phase_group_agent_ids(session, phase_id, group)
+    if fallback in rows:
+        return fallback
+    if rows:
+        return rows[0]
+    return fallback
+
+
+def _filter_visible_signal_outputs(session, agent_id: str, rows):
+    groups = _visible_groups_for_agent(session, agent_id)
+    agents = _visible_agents_for_agent(session, agent_id)
+    strategy_groups = _strategy_group_lookup(session)
+    filtered = []
+    for item in rows:
+        strategy_id = str(getattr(item, "strategy_id", "")).strip()
+        group = strategy_groups.get(strategy_id, "")
+        if groups and group and group not in groups:
+            continue
+        if agents and strategy_id and strategy_id not in agents:
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def _filter_visible_events(session, agent_id: str, rows: list[WorldEvent]) -> list[WorldEvent]:
+    groups = _visible_groups_for_agent(session, agent_id)
+    agents = _visible_agents_for_agent(session, agent_id)
+    filtered = []
+    for item in rows:
+        metadata = dict(getattr(item, "metadata", {}) or {})
+        group = str(metadata.get("group", "")).strip()
+        actor_id = str(getattr(item, "actor_id", "")).strip()
+        if groups and group and group not in groups:
+            continue
+        if agents and actor_id and actor_id not in agents:
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def _visible_groups_for_agent(session, agent_id: str) -> set[str]:
+    agent = _agent_by_id(session, agent_id)
+    fabric = _fabric_agent_spec(agent.get("metadata"))
+    return {str(item).strip() for item in (fabric or {}).get("visible_groups", []) if str(item).strip()}
+
+
+def _visible_agents_for_agent(session, agent_id: str) -> set[str]:
+    agent = _agent_by_id(session, agent_id)
+    fabric = _fabric_agent_spec(agent.get("metadata"))
+    return {str(item).strip() for item in (fabric or {}).get("visible_agents", []) if str(item).strip()}
+
+
+def _fabric_agent_spec(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    payload = metadata.get("agent_fabric")
+    return dict(payload or {}) if isinstance(payload, Mapping) else {}
 
 
 def _debate_summary_text(events: list[WorldEvent], round_index: int) -> str:
@@ -3365,11 +3862,15 @@ def _session_dataclass(session):
         current_phase=session.get("current_phase", "idle"),
         current_period=session.get("current_period"),
         visible_through_period=session.get("visible_through_period"),
+        game_id=session.get("game_id", "happy8"),
         active_agent_ids=tuple(session.get("active_agent_ids", [])),
         shared_memory=session.get("shared_memory", {}),
         agent_block_schema_version=int(session.get("agent_block_schema_version", 0) or 0),
         agents=tuple(WorldAgentRef(**item) for item in session.get("agents", [])),
         agent_state=session.get("agent_state", {}),
+        execution_overrides=session.get("execution_overrides", {}),
+        resolved_execution_bindings=session.get("resolved_execution_bindings", {}),
+        feature_profile=session.get("feature_profile", {}),
         request_metrics=session.get("request_metrics", {}),
         progress=session.get("progress", {}),
         round_history=tuple(session.get("round_history", [])),
@@ -3396,6 +3897,19 @@ def _session_budget(session) -> int:
 
 def _session_max_tickets(session) -> int:
     return max(_session_budget(session) // TICKET_COST_YUAN, 1)
+
+
+def _initial_agent_blocks(
+    session,
+    display_name: str,
+    description: str,
+    bankroll: str,
+) -> dict[str, str]:
+    shared = dict(session.get("shared_memory", {}))
+    return {
+        **agent_blocks(display_name, description, bankroll),
+        **{key: str(shared.get(key, "")) for key in SHARED_BLOCKS if key in shared},
+    }
 
 
 def _serialize_prediction_map(predictions, leaderboard) -> dict[str, dict[str, Any]]:
@@ -3469,11 +3983,14 @@ def _round_trace(round_state: dict[str, Any], debate_events: list[dict[str, Any]
         )
     final_decision = round_state.get("final_decision", {})
     if final_decision:
+        owner_id = str(final_decision.get("decision_owner", "purchase_chair")).strip() or "purchase_chair"
+        owner_name = str(final_decision.get("decision_owner_name", "LLM-Purchase-Chair")).strip() or "LLM-Purchase-Chair"
+        owner_group = str(final_decision.get("decision_owner_group", "purchase")).strip() or "purchase"
         phases["handbook_final_decision"].append(
             {
-                "strategy_id": "handbook_decider",
-                "display_name": "Handbook Decider",
-                "group": "decision",
+                "strategy_id": owner_id,
+                "display_name": owner_name,
+                "group": owner_group,
                 "kind": "official_prediction",
                 "numbers": list(final_decision.get("numbers", [])),
                 "comment": str(final_decision.get("rationale", "")),
@@ -3631,6 +4148,40 @@ def _bet_plan_block(bet_plans: dict[str, dict[str, Any]]) -> str:
             f"risk={plan.get('risk_exposure', '-')}"
         )
     return "\n".join(rows) or "- no bettor plans"
+
+
+def _purchase_failure_event(session, period: str, agent_id: str, display_name: str, error: str) -> WorldEvent:
+    return WorldEvent(
+        event_id=world_id("evt"),
+        session_id=session["session_id"],
+        period=period,
+        phase="plan_synthesis",
+        event_type="purchase_proposal_failed",
+        actor_id=agent_id,
+        actor_display_name=display_name,
+        content=error,
+        created_at=world_now(),
+        numbers=(),
+        metadata={"group": "purchase", "status": "failed"},
+    )
+
+
+def _matching_purchase_plan_id(plans: Mapping[str, Mapping[str, Any]], final_plan: Mapping[str, Any], fallback: str) -> str:
+    final_leg = reference_leg_payload(final_plan)
+    final_numbers = tuple(int(value) for value in final_leg.get("numbers", []))
+    final_type = str(final_plan.get("plan_type", "")).strip()
+    final_size = int(final_plan.get("play_size", 0) or 0)
+    for role_id, plan in plans.items():
+        leg = reference_leg_payload(plan)
+        numbers = tuple(int(value) for value in leg.get("numbers", []))
+        if numbers != final_numbers:
+            continue
+        if str(plan.get("plan_type", "")).strip() != final_type:
+            continue
+        if int(plan.get("play_size", 0) or 0) != final_size:
+            continue
+        return role_id
+    return fallback
 
 
 def _plan_guard_lines(budget_yuan: int, max_tickets: int) -> list[str]:

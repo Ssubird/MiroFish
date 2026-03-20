@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 
 import {
   getLotteryModels,
@@ -7,12 +7,15 @@ import {
   syncLotteryGraph
 } from '../api/lottery'
 
-const UNCONFIGURED_MODEL_LABEL = '未配置'
+const UNCONFIGURED_MODEL_LABEL = '未配置模型'
+const MODEL_BOOTSTRAP_RETRY_DELAYS_MS = [0, 1500, 3500, 7000]
 
 const unwrapApiPayload = (response) => {
   if (response?.data && typeof response.data === 'object') return response.data
   return response || {}
 }
+
+const wait = (delayMs) => new Promise((resolve) => window.setTimeout(resolve, delayMs))
 
 const normalizeModelEntry = (model) => {
   if (typeof model === 'string') {
@@ -22,7 +25,9 @@ const normalizeModelEntry = (model) => {
   if (!model || typeof model !== 'object') return null
   const id = String(model.id || model.name || '').trim()
   if (!id) return null
-  return { ...model, id, label: String(model.label || id).trim() || id }
+  const providerId = String(model.provider_id || '').trim()
+  const label = String(model.label || [providerId, id].filter(Boolean).join(' / ') || id).trim() || id
+  return { ...model, id, label }
 }
 
 const normalizeModelList = (models) => {
@@ -47,6 +52,7 @@ export const useLotterySetup = (setError) => {
   const selectedModelName = ref('')
   const modelProbeResult = ref(null)
   const modelListStatus = ref('')
+  let bootstrapToken = 0
 
   const llmStatus = computed(() => overview.value?.llm_status || null)
   const zepGraphStatus = computed(() => overview.value?.zep_graph_status || null)
@@ -62,6 +68,7 @@ export const useLotterySetup = (setError) => {
         selectedModelName.value = payload?.llm_status?.model || ''
       }
       if (onLoaded) onLoaded(payload)
+      return payload
     } catch (err) {
       setError(err.message || '读取工作区概览失败')
       return null
@@ -70,11 +77,12 @@ export const useLotterySetup = (setError) => {
     }
   }
 
-  const loadModels = async () => {
-    if (llmModelLoading.value) return
+  const loadModels = async (options = {}) => {
+    const { silent = false } = options
+    if (llmModelLoading.value) return false
     llmModelLoading.value = true
     modelProbeResult.value = null
-    modelListStatus.value = ''
+    if (!silent) modelListStatus.value = ''
     try {
       const payload = unwrapApiPayload(await getLotteryModels())
       const models = normalizeModelList(payload.models)
@@ -87,12 +95,34 @@ export const useLotterySetup = (setError) => {
         selectedModelName.value = current
       }
       modelListStatus.value = models.length ? `已加载 ${models.length} 个模型` : '模型接口返回了空列表'
+      return models.length > 0 || Boolean(current)
     } catch (err) {
-      modelListStatus.value = ''
-      setError(err.message || '读取模型列表失败')
+      modelListStatus.value = silent ? '模型服务启动中，正在自动重试...' : ''
+      if (!silent) {
+        setError(err.message || '读取模型列表失败')
+      }
+      return false
     } finally {
       llmModelLoading.value = false
     }
+  }
+
+  const bootstrapModels = async () => {
+    if (llmModels.value.length) return true
+    const currentToken = bootstrapToken + 1
+    bootstrapToken = currentToken
+    for (const delayMs of MODEL_BOOTSTRAP_RETRY_DELAYS_MS) {
+      if (currentToken !== bootstrapToken) return false
+      if (delayMs > 0) {
+        await wait(delayMs)
+      }
+      const ready = await loadModels({ silent: true })
+      if (ready) return true
+    }
+    if (!llmModels.value.length) {
+      modelListStatus.value = '模型服务暂未就绪，可稍后手动重试。'
+    }
+    return false
   }
 
   const probeSelectedModel = async (modelName) => {
@@ -120,10 +150,15 @@ export const useLotterySetup = (setError) => {
       return payload
     } catch (err) {
       setError(err.message || '同步图谱失败')
+      return null
     } finally {
       graphSyncing.value = false
     }
   }
+
+  onBeforeUnmount(() => {
+    bootstrapToken += 1
+  })
 
   return {
     overview,
@@ -140,6 +175,7 @@ export const useLotterySetup = (setError) => {
     availableStrategies,
     loadOverview,
     loadModels,
+    bootstrapModels,
     probeSelectedModel,
     syncGraph
   }

@@ -73,6 +73,7 @@ data/
 /ziweidoushu/.letta_runtime_test/
 /ziweidoushu/.kuzu_graph.runtime_projection.json
 /ziweidoushu/.kuzu_graph
+/ziweidoushu/.kuzu_graph.state.json
 /ziweidoushu/.kuzu_graph_state.json
 /backend/tmp/
 

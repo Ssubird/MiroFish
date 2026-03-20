@@ -1,0 +1,103 @@
+# Execution Fabric configuration – all provider/model bindings are explicit.
+# Three-level override: role_defaults → group_overrides → agent_overrides.
+
+
+providers:
+  - provider_id: default
+    kind: openai_compatible
+    # Falls back to Config.LLM_BASE_URL / Config.LLM_API_KEY when omitted.
+
+
+models:
+  - model_id: default
+    provider_id: default
+    capability_tags: [json, fast]
+
+
+profiles:
+  - profile_id: default
+    provider_id: default
+    model_id: default
+    temperature: 0.7
+    max_tokens: 2000
+    json_mode: false
+
+  - profile_id: generator_default
+    provider_id: default
+    model_id: default
+    temperature: 0.3
+    max_tokens: 1600
+    json_mode: true
+    prompt_style: strict_json
+
+  - profile_id: social_default
+    provider_id: default
+    model_id: default
+    temperature: 0.5
+    max_tokens: 1200
+    json_mode: true
+
+  - profile_id: judge_default
+    provider_id: default
+    model_id: default
+    temperature: 0.2
+    max_tokens: 2000
+    json_mode: true
+
+  - profile_id: purchase_default
+    provider_id: default
+    model_id: default
+    temperature: 0.1
+    max_tokens: 2000
+    json_mode: true
+
+  - profile_id: decision_default
+    provider_id: default
+    model_id: default
+    temperature: 0.2
+    max_tokens: 4000
+    json_mode: true
+    prompt_style: reasoned_json
+    fallback_profile_ids: []
+
+
+# Map role_kind → default profile
+role_defaults:
+  generator: generator_default
+  social: social_default
+  judge: judge_default
+  purchase: purchase_default
+  decision: decision_default
+
+
+# Override profile for all agents in a group (uncomment to use)
+group_overrides: {}
+#  data: generator_fast_local
+#  metaphysics: generator_long_context
+
+
+# Override profile for a specific agent (uncomment to use)
+agent_overrides: {}
+#  purchase_chair: pond_purchase_default
+#  purchase_value_guard: boost_purchase_default
+#  purchase_coverage_builder: zenscale_purchase_default
+#  purchase_ziwei_conviction: sakura_purchase_default
+#  social_consensus_feed: boost_social_default
+#  consensus_judge: pond_judge_default
+
+
+decision_weights:
+  draw_signal: 1.0
+  anti_crowding: 1.4
+  payout_surrogate: 1.2
+  pattern_risk: 1.1
+
+
+happy8_feature_profile:
+  feature_extractors: [sum, span, odd_even_balance, edge_count, cluster_count, ac_proxy]
+  crowding_rules: [arithmetic_progression, symmetry, geometric_pattern, prior_winning_copy, shifted_winning_copy, hot_cold_narrative, omission_chasing]
+  payout_surrogate_weights:
+    ac_proxy: 1.0
+    span_ratio: 0.8
+    edge_ratio: -0.4
+    cluster_count: 0.6

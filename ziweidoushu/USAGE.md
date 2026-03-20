@@ -2,25 +2,27 @@
 
 ## Current Runtime
 
-- Primary runtime: `world_v2_market`
-- Public action: `POST /api/lottery/world/advance`
-- Removed: `/api/lottery/world/evolution`
-- Removed: `iterations`
-- Kept: `agent_dialogue_rounds`
-- Frontend discussion rounds max: `5`
+- primary runtime: `world_v2_market`
+- public action: `POST /api/lottery/world/advance`
+- setup endpoint: `POST /api/lottery/world/prepare`
+- execution catalog: `GET /api/lottery/execution/registry`
+- removed: `/api/lottery/world/evolution`
+- removed: `iterations`
+- kept: `agent_dialogue_rounds`
+- frontend discussion rounds max: `5`
 
 ## Visible-Through Workflow
 
-The period selector now means `visible_through_period`.
+The period selector means `visible_through_period`.
 
 Rules:
 
-- Select `2026063`
+- select `2026063`
   - visible data ends at `2026063`
   - the system predicts `2026064`
-  - `2026064` actual numbers must stay hidden
-- Select `2026064` next time
-  - if `2026064` actual data is already present, the system first settles and postmortems `2026064`
+  - `2026064` actual numbers remain hidden
+- select `2026064` next time
+  - if `2026064` actual data already exists, the system first settles and postmortems `2026064`
   - then it predicts `2026065`
 
 Repeated clicks on the same `visible_through_period` with unchanged draw data do not create duplicate predictions or duplicate hit records.
@@ -73,9 +75,70 @@ Removed runtime roles:
 - `hybrid_bridge_100`
 - `llm_hybrid_panel`
 
+## Execution Bindings
+
+Execution defaults come from `backend/app/services/lottery/execution_config.yaml`.
+
+The system resolves bindings in this order:
+
+1. role default
+2. group override
+3. agent override
+4. session `execution_overrides`
+
+Rules:
+
+- the UI selects `profile_id`
+- UI overrides apply to the current session only
+- YAML remains the source of persistent defaults
+- no adaptive provider or model selection is used
+
+Current Local/no-MCP runtime can enforce per-agent bindings.
+Letta currently mirrors binding metadata only.
+
+## Signal Boards
+
+The canonical market surface is `SignalBoard`.
+
+Generators may still emit `StrategyPrediction`, but runtime adapts them into boards before the market stage.
+
+Boards carry at least:
+
+- number scores
+- structure scores
+- play-size scores
+- crowding penalties
+- payout surrogates
+- exclusions
+- evidence refs
+- confidence
+- rationale
+
+## Handbook Alignment
+
+The runtime now separates:
+
+- draw signal
+- anti-crowding
+- payout surrogate
+- pattern risk
+
+Handbook penalties include:
+
+- arithmetic progression
+- symmetry
+- geometric pattern
+- prior-winning-copy
+- shifted-winning-copy
+- hot/cold narrative
+- omission chasing
+- beautiful math pattern
+
+These features are filters and value surrogates, not “more likely to draw” claims.
+
 ## Shared Memory Blocks
 
-The current Letta shared blocks are:
+Current Letta shared blocks:
 
 - `current_issue`
 - `visible_draw_history_digest`
@@ -91,12 +154,28 @@ The current Letta shared blocks are:
 
 State machine logic stays in `world_v2_runtime`. Shared blocks only carry current-issue context.
 
+## Game Kernel
+
+Happy8 currently runs through:
+
+- `games/base.py`
+- `games/happy8/definition.py`
+- `games/happy8/features.py`
+
+This layer owns:
+
+- selection validation
+- plan expansion
+- pricing
+- settlement
+- feature extraction
+
 ## Result Lines
 
-Two lines are now explicit:
+Two result lines are explicit:
 
-- Official prediction line: `handbook_decider`
-- Purchase ROI line: `purchase_chair`
+- official prediction line: `handbook_decider`
+- purchase ROI line: `purchase_chair`
 
 `latest_purchase_plan` means purchase recommendation only. It is not the official final prediction.
 
@@ -104,21 +183,19 @@ Two lines are now explicit:
 
 Each run still writes a timestamped run report.
 
-Per settled issue the system now also writes:
+Per settled issue the system also writes:
 
-- ledger
-  - `reports/lottery-issue-ledger.json`
-  - `reports/lottery-issue-ledger.md`
-- fixed per-issue reports
-  - `reports/issues/issue_<suffix>_report.json`
-  - `reports/issues/issue_<suffix>_report.md`
+- `reports/lottery-issue-ledger.json`
+- `reports/lottery-issue-ledger.md`
+- `reports/issues/issue_<suffix>_report.json`
+- `reports/issues/issue_<suffix>_report.md`
 
 Example:
 
 - `reports/issues/issue_064_report.json`
 - `reports/issues/issue_064_report.md`
 
-Each per-issue report is fixed to six sections:
+Each per-issue report uses six fixed sections:
 
 1. `本期背景`
 2. `原始信号`
@@ -129,7 +206,7 @@ Each per-issue report is fixed to six sections:
 
 ## Kuzu Runtime Use
 
-Kuzu is kept as an analysis substrate, not a per-phase hard dependency.
+Kuzu is kept as an analysis substrate.
 
 Current rules:
 
@@ -154,13 +231,13 @@ This cache is used for social, judge, `purchase_chair`, and `handbook_decider`.
 
 `world_v2_market` can run without MCP.
 
-Important pieces:
+Key pieces:
 
 - env switch: `LOTTERY_WORLD_ALLOW_NO_MCP=true`
-- local direct client: `LocalWorldClient`
+- direct local client: `LocalWorldClient`
 - readiness branch: `world_runtime_readiness.py`
 
-MCP still adds tools, but it is no longer a hard start-up requirement.
+MCP still adds tools, but it is not required to start the runtime.
 
 ## API Example
 
@@ -173,7 +250,15 @@ $body = @{
   agent_dialogue_rounds = 5
   live_interview_enabled = $false
   visible_through_period = "2026063"
-} | ConvertTo-Json
+  execution_overrides = @{
+    group = @{
+      social = "social_fast_json"
+    }
+    agent = @{
+      handbook_decider = "decision_default"
+    }
+  }
+} | ConvertTo-Json -Depth 6
 
 Invoke-RestMethod `
   -Method Post `

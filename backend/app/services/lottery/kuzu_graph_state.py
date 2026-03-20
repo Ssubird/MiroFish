@@ -31,6 +31,7 @@ class KuzuGraphStateStore:
         return KuzuGraphState(**payload)
 
     def save(self, state: KuzuGraphState) -> None:
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.state_file.write_text(
             json.dumps(asdict(state), ensure_ascii=False, indent=2),
             encoding="utf-8",

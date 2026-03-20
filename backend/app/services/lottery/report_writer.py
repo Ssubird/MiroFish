@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from .issue_report import build_issue_report_payload, issue_report_stem
+from .issue_report import build_issue_report_payload, issue_report_stem, pending_issue_report_item
 from .issue_report_markdown import build_issue_report_markdown
 from .paths import REPORTS_DIR, lottery_relative_path
 from .report_markdown import build_markdown_report
@@ -29,24 +29,35 @@ class LotteryReportWriter:
         paths = self._report_paths(run_id)
         artifacts = self._artifact_summary(run_id, saved_at, paths)
         enriched = dict(payload)
-        enriched["report_artifacts"] = artifacts
+        ledger_artifacts = self._write_issue_reports(enriched)
+        enriched["report_artifacts"] = artifacts | ledger_artifacts
         paths["json"].write_text(json.dumps(enriched, ensure_ascii=False, indent=2), encoding="utf-8")
         paths["markdown"].write_text(build_markdown_report(enriched), encoding="utf-8")
-        ledger_artifacts = self._write_issue_reports(enriched)
-        return artifacts | ledger_artifacts
+        return dict(enriched["report_artifacts"])
 
     def _write_issue_reports(self, payload: dict[str, object]) -> dict[str, object]:
         session = dict(payload.get("world_session") or {})
         evaluation = dict(payload.get("evaluation") or {})
         ledger = list(session.get("issue_ledger") or [])
         latest_review = dict(session.get("latest_review") or {})
-        if not ledger:
+        pending_item = pending_issue_report_item(payload, session)
+        if not ledger and pending_item is None:
             return {"issue_reports": [], "issue_ledger": None, "latest_review": latest_review}
 
         issues_dir = self.report_dir / ISSUE_DIRNAME
         issues_dir.mkdir(parents=True, exist_ok=True)
         issue_reports = []
-        for item in ledger:
+        issue_items = list(ledger)
+        written_periods = {
+            str(item.get("predicted_period", "")).strip()
+            for item in issue_items
+            if isinstance(item, dict)
+        }
+        pending_period = str((pending_item or {}).get("predicted_period", "")).strip()
+        if pending_period and pending_period not in written_periods:
+            issue_items.append(dict(pending_item or {}))
+
+        for item in issue_items:
             period = str(item.get("predicted_period", "")).strip()
             if not period:
                 continue

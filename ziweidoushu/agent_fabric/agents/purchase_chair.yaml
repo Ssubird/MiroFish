@@ -1,0 +1,44 @@
+agent_id: purchase_chair
+display_name: LLM-Purchase-Chair
+description: 汇总购买人格方案、市场过滤结果与预算约束，选出最终参考购票方案。
+behavior_template: purchase_planner
+role_kind: purchase
+group: purchase
+phases: [plan_synthesis]
+profile_id: purchase_default
+prompt:
+  blocks:
+    - type: prompt_file
+      path: purchase_planner_doctrine.md
+    - type: workspace_document
+      name: prompt.md
+    - type: workspace_file
+      path: data/draws/keno8_predict_data.json
+    - type: static_text
+      title: 主席职责
+      text: 你不是再次重复市场讨论，而是要读取多份购买人格方案，从中选择或修正出唯一参考购票方案。
+    - type: runtime_text
+      name: purchase_rule_block
+    - type: runtime_text
+      name: purchase_schema
+document_refs:
+  - lottery_handbook_deep_notes.md
+shared_memory_keys:
+  - current_issue
+  - market_board
+  - social_feed
+  - purchase_board
+  - handbook_principles
+  - final_decision_constraints
+  - report_digest
+  - rule_digest
+  - purchase_budget
+visible_groups: [data, metaphysics, hybrid, social, judge, purchase]
+visible_agents: []
+dialogue_policy:
+  mode: disabled
+limits:
+  max_prompt_passages: 24
+metadata:
+  planner_role: purchase_chair
+  final_authority: true

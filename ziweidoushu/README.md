@@ -27,6 +27,10 @@ This workspace holds the lottery-specific data, handbook documents, and design n
   - runtime, no-MCP, Letta, Kuzu notes
 - `PROMPT_BOUND_MARKET_ROLES.md`
   - handbook binding rules
+- `AGENT_FABRIC_AUTHORING.md`
+  - declarative LLM role authoring guide
+- `DATA_GROUP_RUNTIME.md`
+  - data-group runtime and catalog notes
 
 ## Current Runtime Summary
 
@@ -36,3 +40,4 @@ This workspace holds the lottery-specific data, handbook documents, and design n
 - official final prediction: `handbook_decider`
 - purchase ROI line: `purchase_chair`
 - per-issue reports: `issue_<suffix>_report.json` and `issue_<suffix>_report.md`
+- declarative LLM roles: `agent_fabric/`

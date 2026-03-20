@@ -1,0 +1,38 @@
+agent_id: purchase_value_guard
+display_name: Purchase Persona - Value Guard
+description: 基于手册里的反拥挤与分奖风险原则，给出更重视价值密度的可执行购票方案。
+behavior_template: purchase_planner
+role_kind: purchase
+group: purchase
+phases: [plan_synthesis]
+profile_id: purchase_default
+prompt:
+  blocks:
+    - type: prompt_file
+      path: purchase_planner_doctrine.md
+    - type: prompt_file
+      path: purchase_value_guard.md
+    - type: runtime_text
+      name: purchase_rule_block
+    - type: runtime_text
+      name: purchase_schema
+document_refs:
+  - lottery_handbook_deep_notes.md
+shared_memory_keys:
+  - current_issue
+  - market_board
+  - social_feed
+  - purchase_board
+  - handbook_principles
+  - report_digest
+  - rule_digest
+  - purchase_budget
+visible_groups: [data, metaphysics, hybrid, social, judge, purchase]
+visible_agents: []
+dialogue_policy:
+  mode: disabled
+limits:
+  max_prompt_passages: 24
+metadata:
+  planner_role: purchase_value_guard
+  purchase_persona_mode: value_guard

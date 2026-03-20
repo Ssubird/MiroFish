@@ -25,6 +25,7 @@ class WorldAgentRef:
     letta_agent_id: str
     strategy_id: str | None = None
     description: str = ""
+    execution_binding: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,11 +64,15 @@ class WorldSession:
     current_phase: str = "idle"
     current_period: str | None = None
     visible_through_period: str | None = None
+    game_id: str = "happy8"
     active_agent_ids: tuple[str, ...] = ()
     shared_memory: Mapping[str, str] = field(default_factory=dict)
     agent_block_schema_version: int = 0
     agents: tuple[WorldAgentRef, ...] = ()
     agent_state: Mapping[str, Any] = field(default_factory=dict)
+    execution_overrides: Mapping[str, Any] = field(default_factory=dict)
+    resolved_execution_bindings: Mapping[str, Any] = field(default_factory=dict)
+    feature_profile: Mapping[str, Any] = field(default_factory=dict)
     request_metrics: Mapping[str, Any] = field(default_factory=dict)
     progress: Mapping[str, Any] = field(default_factory=dict)
     round_history: tuple[Mapping[str, Any], ...] = ()
@@ -100,6 +105,7 @@ class WorldSession:
         selected_strategy_ids: list[str],
         world_goal: str,
         llm_model_name: str | None = None,
+        game_id: str = "happy8",
         session_id: str | None = None,
     ) -> "WorldSession":
         now = world_now()
@@ -114,4 +120,5 @@ class WorldSession:
             updated_at=now,
             world_goal=world_goal,
             llm_model_name=llm_model_name,
+            game_id=game_id,
         )

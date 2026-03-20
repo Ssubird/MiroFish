@@ -1317,7 +1317,7 @@ class LotteryWorldRuntime:
             list(strategies.keys()),
             "尽量中奖，并保留可解释的社交世界决策过程。",
             model_name,
-            session_id,
+            session_id=session_id,
         ).to_dict()
         session["status"] = "idle"
         session["agents"] = []
@@ -1373,7 +1373,7 @@ class LotteryWorldRuntime:
             list(strategies.keys()),
             "尽量中奖，并保留可解释的社交世界决策过程。",
             model_name,
-            session_id,
+            session_id=session_id,
         ).to_dict()
         session["status"] = "idle"
         session["agents"] = []

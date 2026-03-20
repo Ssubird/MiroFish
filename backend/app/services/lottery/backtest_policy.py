@@ -29,14 +29,22 @@ def select_strategies(
     strategy_ids: list[str] | None,
 ) -> dict[str, object]:
     if not strategy_ids:
-        return strategies
+        return _default_enabled_strategies(strategies)
     filtered_ids = [strategy_id for strategy_id in strategy_ids if strategy_id not in RETIRED_STRATEGY_IDS]
     if not filtered_ids:
-        return strategies
+        return _default_enabled_strategies(strategies)
     unknown_ids = [strategy_id for strategy_id in filtered_ids if strategy_id not in strategies]
     if unknown_ids:
         raise ValueError(f"Unknown strategies: {', '.join(unknown_ids)}")
     return {strategy_id: strategies[strategy_id] for strategy_id in filtered_ids}
+
+
+def _default_enabled_strategies(strategies: dict[str, object]) -> dict[str, object]:
+    return {
+        strategy_id: strategy
+        for strategy_id, strategy in strategies.items()
+        if bool(getattr(strategy, "default_enabled", True))
+    }
 
 
 def primary_strategies(

@@ -2,6 +2,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import {
   advanceLotteryWorld,
+  getLotteryExecutionRegistry,
   getLotteryWorldRuntimeReadiness
 } from '../api/lottery'
 import { useLotterySetup } from './useLotterySetup'
@@ -29,6 +30,8 @@ export const useLotteryWorldStudio = () => {
   const selectedStrategyIds = ref([])
   const selectedGraphNodeId = ref('')
   const selectedNumber = ref(null)
+  const executionRegistry = ref(null)
+  const executionOverrides = ref({ group_overrides: {}, agent_overrides: {} })
 
   const setError = (message) => {
     error.value = message
@@ -67,6 +70,7 @@ export const useLotteryWorldStudio = () => {
     recentNumbers.value.find((item) => item.number === selectedNumber.value) || null
   ))
   const activeModelName = computed(() => setup.selectedModelName.value || setup.llmStatus.value?.model || '')
+  const resolvedExecutionBindings = computed(() => session.value?.resolved_execution_bindings || {})
   const canAdvance = computed(() => (
     !busy.value
     && runtimeReadiness.value?.ready === true
@@ -89,6 +93,33 @@ export const useLotteryWorldStudio = () => {
   const clearRunState = () => {
     runMessage.value = ''
     running.value = false
+  }
+
+  const normalizeOverrides = (value) => ({
+    group_overrides: Object.fromEntries(Object.entries(value?.group_overrides || {}).filter(([, profileId]) => String(profileId || '').trim())),
+    agent_overrides: Object.fromEntries(Object.entries(value?.agent_overrides || {}).filter(([, profileId]) => String(profileId || '').trim()))
+  })
+
+  const loadExecutionRegistry = async () => {
+    try {
+      const response = await getLotteryExecutionRegistry()
+      executionRegistry.value = response.data || null
+    } catch (err) {
+      executionRegistry.value = null
+      setError(err.message || '读取执行绑定配置失败')
+    }
+  }
+
+  const setExecutionOverride = (scope, key, profileId) => {
+    const normalized = normalizeOverrides(executionOverrides.value)
+    const targetKey = scope === 'agent' ? 'agent_overrides' : 'group_overrides'
+    if (profileId) normalized[targetKey][key] = profileId
+    else delete normalized[targetKey][key]
+    executionOverrides.value = normalized
+  }
+
+  const resetExecutionOverrides = () => {
+    executionOverrides.value = { group_overrides: {}, agent_overrides: {} }
   }
 
   const loadRuntimeReadiness = async () => {
@@ -144,11 +175,13 @@ export const useLotteryWorldStudio = () => {
       setup.loadOverview(syncSelectedStrategies),
       loadRuntimeReadiness(),
       world.loadCurrentWorld(),
-      setup.loadModels()
+      loadExecutionRegistry()
     ])
+    void setup.bootstrapModels()
     const sessionId = snapshot?.session?.session?.session_id || ''
     const status = snapshot?.session?.session?.status || ''
     if (snapshot) {
+      executionOverrides.value = normalizeOverrides(snapshot?.session?.session?.execution_overrides_snapshot || snapshot?.session?.session?.execution_overrides || {})
       updateRunMessage(snapshot)
       if (sessionId && ACTIVE_SESSION_STATUSES.has(status)) {
         world.startPolling(sessionId, updateRunMessage)
@@ -163,7 +196,7 @@ export const useLotteryWorldStudio = () => {
   }
 
   const loadModels = async () => {
-    await setup.loadModels()
+    await setup.loadModels({ silent: false })
   }
 
   const syncKuzuGraph = async (force = false) => {
@@ -200,7 +233,8 @@ export const useLotteryWorldStudio = () => {
         live_interview_enabled: liveInterviewEnabled.value,
         budget_yuan: budgetYuan.value,
         session_id: currentSessionId.value || undefined,
-        visible_through_period: visibleThroughPeriod.value || undefined
+        visible_through_period: visibleThroughPeriod.value || undefined,
+        execution_overrides: normalizeOverrides(executionOverrides.value)
       })
       const sessionId = response.data?.world_session?.session_id || ''
       const snapshot = await world.loadWorld(sessionId)
@@ -218,6 +252,7 @@ export const useLotteryWorldStudio = () => {
     const ok = await world.resetWorld()
     if (!ok) return
     clearRunState()
+    resetExecutionOverrides()
     selectedGraphNodeId.value = ''
     selectedNumber.value = null
   }
@@ -238,6 +273,7 @@ export const useLotteryWorldStudio = () => {
   watch(session, (payload) => {
     if (!payload) return
     budgetYuan.value = Number(payload.budget_yuan || budgetYuan.value)
+    executionOverrides.value = normalizeOverrides(payload.execution_overrides || {})
     const chosen = payload.selected_strategy_ids || []
     if (!Array.isArray(chosen) || !chosen.length) return
     selectedStrategyIds.value = [...chosen]
@@ -280,12 +316,18 @@ export const useLotteryWorldStudio = () => {
     latestPrediction,
     latestPurchasePlan,
     latestSettlement,
+    lastInterview: world.worldLastInterview,
+    executionRegistry,
+    executionOverrides,
+    resolvedExecutionBindings,
     selectedGraphNode,
     selectedNumberDetail,
     worldInterviewAgentId: world.worldInterviewAgentId,
     worldInterviewPrompt: world.worldInterviewPrompt,
     worldInterviewBusy: world.worldInterviewBusy,
     canAdvance,
+    setExecutionOverride,
+    resetExecutionOverrides,
     syncKuzuGraph,
     advanceWorld,
     resetWorld,
