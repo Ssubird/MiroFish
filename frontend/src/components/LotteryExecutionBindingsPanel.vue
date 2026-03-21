@@ -62,10 +62,8 @@ const GROUPS = [
   ['data', '数据组'],
   ['metaphysics', '玄学组'],
   ['hybrid', '混合组'],
-  ['social', '社交层'],
-  ['judge', '裁判层'],
-  ['purchase', '购买层'],
-  ['decision', '终判层']
+  ['social', '市场摘要层'],
+  ['purchase', '购买层']
 ]
 
 const providers = computed(() => props.catalog?.providers || [])

@@ -13,13 +13,10 @@ prompt:
     - type: static_text
       title: 市场脉冲职责
       text: 只总结当前主叙事和高交易密度号码，不替代购买层做购票决定。
-document_refs:
-  - lottery_handbook_deep_notes.md
 shared_memory_keys:
   - current_issue
   - market_board
   - social_feed
-  - handbook_principles
   - report_digest
   - rule_digest
   - purchase_budget

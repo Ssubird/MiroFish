@@ -300,6 +300,7 @@ def _backtest_params(payload: dict[str, object]) -> dict[str, object]:
         "live_interview_enabled": bool(payload.get("live_interview_enabled", DEFAULT_LIVE_INTERVIEW_ENABLED)),
         "budget_yuan": int(payload.get("budget_yuan", DEFAULT_BUDGET_YUAN)),
         "session_id": str(payload.get("session_id", "")).strip() or None,
+        "force_new_session": bool(payload.get("force_new_session", False)),
         "visible_through_period": _optional_string(payload.get("visible_through_period")),
         "execution_overrides": _execution_overrides(payload.get("execution_overrides")),
     }

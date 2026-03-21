@@ -2,10 +2,8 @@ export const GROUP_LABELS = {
   data: '数据组',
   metaphysics: '玄学组',
   hybrid: '混合组',
-  social: '市场讨论',
-  judge: '市场裁判',
-  purchase: '购买建议',
-  decision: '官方终判'
+  social: '市场摘要',
+  purchase: '购买层'
 }
 
 export const NODE_TYPE_LABELS = {
@@ -19,12 +17,12 @@ export const groupLabel = (group) => GROUP_LABELS[group] || group || '-'
 export const kindLabel = (kind) => {
   if (kind === 'llm') return 'LLM'
   if (kind === 'market_synthesis') return '市场综合'
-  if (kind === 'official_prediction') return '官方终判'
+  if (kind === 'official_prediction') return '最终预测'
   return '规则'
 }
 
 export const runtimeLabel = (mode) => {
-  if (mode === 'world_v2_market') return '市场持续世界'
+  if (mode === 'world_v2_market') return '购买主线世界'
   if (mode === 'world_v1') return '旧版持续世界'
   return '经典回测'
 }
@@ -36,11 +34,10 @@ export const phaseLabel = (phase) => {
     idle: '待命',
     queued: '排队中',
     opening: '开场选题',
-    generator_opening: '生成组开板',
-    social_propagation: '市场讨论',
-    market_rerank: '市场重排',
-    plan_synthesis: '购买建议',
-    handbook_final_decision: '官方终判',
+    generator_opening: '生成组开盘',
+    social_propagation: '市场摘要',
+    plan_synthesis: '购买方案收口',
+    final_decision: '最终预测',
     public_debate: '公开讨论',
     judge_synthesis: '裁判综合',
     purchase_committee: '购买委员会',
@@ -65,13 +62,11 @@ export const eventLabel = (type) => {
     external_interview: '人工追问',
     debate_post: '公开讨论',
     debate_summary: '讨论总结',
-    social_post: '市场发帖',
-    social_reply: '市场回帖',
-    market_rank: '市场重排',
-    judge_decision: '裁判结论',
+    social_post: '市场发言',
+    social_reply: '市场回复',
     purchase_proposal: '购买提案',
-    purchase_decision: '购买建议',
-    official_prediction: '官方终判'
+    purchase_decision: '购买方案',
+    official_prediction: '最终预测'
   }
   return labels[type] || type || '-'
 }

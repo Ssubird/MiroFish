@@ -184,9 +184,9 @@
       <article class="section-card">
         <div class="section-head">
           <h3>市场讨论</h3>
-          <span>{{ marketPosts.length + judgeBoards.length }}</span>
+          <span>{{ marketPosts.length }}</span>
         </div>
-        <div v-if="!marketPosts.length && !judgeBoards.length" class="empty-log">当前还没有市场讨论记录。</div>
+        <div v-if="!marketPosts.length" class="empty-log">当前还没有市场讨论记录。</div>
         <div v-else class="event-list">
           <div v-for="item in marketPosts" :key="item.event_id || `social-${item.actor_id}`" class="event-item">
             <strong>{{ item.actor_display_name || item.actor_id }}</strong>
@@ -194,14 +194,6 @@
             <p>
               {{ shortText(item.content, 160) }}
               <button v-if="(item.content || '').length > 160" class="text-link" @click="$emit('view-details', {title: `市场发言 - ${item.actor_display_name || item.actor_id}`, content: item.content})">阅读全文</button>
-            </p>
-          </div>
-          <div v-for="item in judgeBoards" :key="item.event_id || `judge-${item.actor_id}`" class="event-item">
-            <strong>{{ item.actor_display_name || item.actor_id }}</strong>
-            <span>裁判意见</span>
-            <p>
-              {{ shortText(item.content, 160) }}
-              <button v-if="(item.content || '').length > 160" class="text-link" @click="$emit('view-details', {title: `裁判意见 - ${item.actor_display_name || item.actor_id}`, content: item.content})">阅读全文</button>
             </p>
           </div>
         </div>
@@ -398,7 +390,6 @@ const latestReview = computed(() => props.latestPrediction?.latest_review || ses
 const generatorBoards = computed(() => props.latestPrediction?.generator_boards || [])
 const marketDiscussion = computed(() => props.latestPrediction?.market_discussion || {})
 const marketPosts = computed(() => marketDiscussion.value.social_posts || [])
-const judgeBoards = computed(() => marketDiscussion.value.judge_boards || [])
 const issueLedger = computed(() => session.value?.issue_ledger || [])
 const reportArtifacts = computed(() => session.value?.report_artifacts || props.sessionData?.report_artifacts || null)
 
@@ -426,7 +417,6 @@ const topNumbers = (item) => {
 </script>
 
 <style scoped>
-/* ── Shell ── */
 .inspector-shell {
   display: flex;
   flex-direction: column;
@@ -436,23 +426,20 @@ const topNumbers = (item) => {
   overflow: visible;
   padding: 1.15rem;
   border-radius: 1.5rem;
-  border: 1px solid rgba(0, 240, 255, 0.12);
-  background: rgba(11, 12, 16, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4), inset 0 0 16px rgba(0, 240, 255, 0.04);
-  color: #e0e6ed;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.92), rgba(246, 239, 229, 0.94));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
-/* ── Tab Bar ── */
 .tab-bar {
   display: flex;
   gap: 0.25rem;
   flex-wrap: wrap;
-  padding: 0.25rem;
-  border-radius: 0.85rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.28rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
 }
 
 .tab-btn {
@@ -461,11 +448,11 @@ const topNumbers = (item) => {
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  padding: 0.6rem 0.5rem;
+  padding: 0.62rem 0.5rem;
   border: 1px solid transparent;
-  border-radius: 0.65rem;
+  border-radius: 0.8rem;
   background: transparent;
-  color: #8b9bb4;
+  color: var(--lottery-muted, #6d5a48);
   font: inherit;
   font-size: 0.82rem;
   font-weight: 600;
@@ -477,15 +464,15 @@ const topNumbers = (item) => {
 }
 
 .tab-btn:hover {
-  color: #c8d6e5;
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--lottery-panel-ink, #2f251a);
+  background: rgba(255, 255, 255, 0.48);
 }
 
 .tab-btn.active {
-  color: #00f0ff;
-  background: rgba(0, 240, 255, 0.1);
-  border-color: rgba(0, 240, 255, 0.2);
-  box-shadow: 0 0 12px rgba(0, 240, 255, 0.12);
+  color: #fff;
+  background: linear-gradient(135deg, var(--lottery-accent, #a66a2c), var(--lottery-accent-strong, #7e4b1d));
+  border-color: transparent;
+  box-shadow: 0 12px 22px rgba(126, 75, 29, 0.18);
 }
 
 .tab-icon {
@@ -493,7 +480,6 @@ const topNumbers = (item) => {
   line-height: 1;
 }
 
-/* ── Tab Content ── */
 .tab-content {
   display: grid;
   gap: 1rem;
@@ -504,12 +490,20 @@ const topNumbers = (item) => {
   min-height: 0;
 }
 
-.tab-content::-webkit-scrollbar { width: 5px; }
-.tab-content::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.02); border-radius: 10px; }
-.tab-content::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.15); border-radius: 10px; }
-.tab-content::-webkit-scrollbar-thumb:hover { background: rgba(0, 240, 255, 0.3); }
+.tab-content::-webkit-scrollbar {
+  width: 5px;
+}
 
-/* ── Grids ── */
+.tab-content::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 10px;
+}
+
+.tab-content::-webkit-scrollbar-thumb {
+  background: rgba(109, 90, 72, 0.24);
+  border-radius: 10px;
+}
+
 .summary-grid,
 .stack-grid,
 .event-list,
@@ -524,7 +518,6 @@ const topNumbers = (item) => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-/* ── Shared card & layout resets ── */
 .inspector-header,
 .header-actions,
 .section-head,
@@ -548,40 +541,39 @@ const topNumbers = (item) => {
 .log-item {
   display: grid;
   gap: 0.65rem;
-  padding: 0.85rem;
-  border-radius: 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(255, 255, 255, 0.025);
+  padding: 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: rgba(255, 255, 255, 0.58);
   transition: all 0.25s ease;
 }
 
 .summary-card:hover,
 .section-card:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.72);
+  border-color: var(--lottery-line-strong, rgba(88, 66, 39, 0.2));
 }
 
 .focus-card {
-  border-color: rgba(0, 240, 255, 0.18);
+  border-color: rgba(47, 119, 107, 0.16);
 }
 
 .focus-card.is-active,
 .status-card {
-  background: rgba(0, 240, 255, 0.06);
-  border-color: rgba(0, 240, 255, 0.2);
-  box-shadow: 0 0 16px rgba(0, 240, 255, 0.08);
+  background: linear-gradient(135deg, rgba(47, 119, 107, 0.08), rgba(255, 255, 255, 0.72));
+  border-color: rgba(47, 119, 107, 0.2);
+  box-shadow: 0 12px 28px rgba(47, 119, 107, 0.08);
 }
 
 .status-banner {
   margin: 0;
-  padding: 0.6rem 0.85rem;
-  border-radius: 0.65rem;
-  background: rgba(255, 255, 255, 0.04);
-  color: #fff;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--lottery-panel-ink, #2f251a);
   font-size: 0.92rem;
 }
 
-/* ── Typography ── */
 .summary-card strong,
 .summary-card span,
 .section-card p,
@@ -598,13 +590,13 @@ const topNumbers = (item) => {
 .summary-card strong {
   display: block;
   font-size: 1.1rem;
-  color: #fff;
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .section-head h3 {
   font-size: 1rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .section-head span,
@@ -613,33 +605,39 @@ const topNumbers = (item) => {
 .empty-log,
 .event-item span,
 .log-code {
-  color: #8b9bb4;
+  color: var(--lottery-muted, #6d5a48);
+}
+
+.eyebrow {
+  font-size: 0.76rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lottery-accent-strong, #7e4b1d);
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  padding: 0.2rem 0.6rem;
+  padding: 0.24rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: rgba(255, 255, 255, 0.56);
   font-size: 0.8rem;
 }
 
 .chip.primary {
-  background: rgba(0, 240, 255, 0.12);
-  border-color: rgba(0, 240, 255, 0.35);
-  color: #00f0ff;
+  background: rgba(166, 106, 44, 0.12);
+  border-color: rgba(166, 106, 44, 0.24);
+  color: var(--lottery-accent-strong, #7e4b1d);
   font-weight: 600;
 }
 
 .chip.alt {
-  background: rgba(255, 193, 77, 0.1);
-  border-color: rgba(255, 193, 77, 0.35);
-  color: #ffc14d;
+  background: rgba(47, 119, 107, 0.1);
+  border-color: rgba(47, 119, 107, 0.22);
+  color: var(--lottery-teal, #2f776b);
 }
 
-/* ── Buttons ── */
 .ghost-btn,
 .run-btn,
 select,
@@ -650,7 +648,7 @@ textarea {
 .ghost-btn,
 .run-btn {
   border-radius: 999px;
-  padding: 0.45rem 0.85rem;
+  padding: 0.48rem 0.88rem;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.85rem;
@@ -658,35 +656,34 @@ textarea {
 }
 
 .ghost-btn {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: #a0b2c6;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--lottery-muted, #6d5a48);
 }
 
 .ghost-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .ghost-btn.danger {
-  color: #ff8c8c;
-  border-color: rgba(255, 140, 140, 0.3);
+  color: var(--lottery-danger, #a13f32);
+  border-color: rgba(161, 63, 50, 0.2);
 }
 
 .ghost-btn.danger:hover:not(:disabled) {
-  background: rgba(255, 80, 80, 0.12);
+  background: rgba(255, 243, 241, 0.92);
 }
 
 .run-btn {
-  border: 1px solid rgba(0, 240, 255, 0.35);
-  background: rgba(0, 240, 255, 0.08);
-  color: #00f0ff;
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.12);
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--lottery-accent, #a66a2c), var(--lottery-accent-strong, #7e4b1d));
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(126, 75, 29, 0.18);
 }
 
 .run-btn:hover:not(:disabled) {
-  background: rgba(0, 240, 255, 0.15);
-  box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+  box-shadow: 0 18px 28px rgba(126, 75, 29, 0.22);
   transform: translateY(-1px);
 }
 
@@ -696,7 +693,6 @@ textarea {
   cursor: not-allowed;
 }
 
-/* ── Form ── */
 .field,
 .form-grid {
   display: grid;
@@ -706,22 +702,21 @@ textarea {
 .field select,
 .field textarea {
   width: 100%;
-  border-radius: 0.65rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 0.7rem 0.85rem;
-  background: rgba(0, 0, 0, 0.3);
-  color: #fff;
+  border-radius: 0.85rem;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  padding: 0.78rem 0.88rem;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--lottery-panel-ink, #2f251a);
   transition: all 0.25s ease;
 }
 
 .field select:focus,
 .field textarea:focus {
   outline: none;
-  border-color: rgba(0, 240, 255, 0.4);
-  box-shadow: 0 0 8px rgba(0, 240, 255, 0.15);
+  border-color: rgba(166, 106, 44, 0.36);
+  box-shadow: 0 0 0 3px rgba(166, 106, 44, 0.1);
 }
 
-/* ── Lists ── */
 .event-list,
 .log-list {
   max-height: 18rem;
@@ -730,39 +725,44 @@ textarea {
 }
 
 .event-item strong {
-  color: #00f0ff;
+  color: var(--lottery-accent-strong, #7e4b1d);
 }
 
 .log-item p {
   margin: 0;
 }
 
-.level-info    { color: #7ce8ff; }
-.level-warning { color: #ffd66b; }
-.level-error   { color: #ff8c8c; }
+.level-info {
+  color: var(--lottery-teal, #2f776b);
+}
 
-/* ── Text Link ── */
+.level-warning {
+  color: var(--lottery-accent, #a66a2c);
+}
+
+.level-error {
+  color: var(--lottery-danger, #a13f32);
+}
+
 .text-link {
   background: none;
   border: none;
   padding: 0;
   margin-left: 0.4rem;
-  color: #00f0ff;
+  color: var(--lottery-accent-strong, #7e4b1d);
   font: inherit;
   font-size: 0.82rem;
   cursor: pointer;
   text-decoration: underline;
-  text-decoration-color: rgba(0, 240, 255, 0.35);
+  text-decoration-color: rgba(126, 75, 29, 0.35);
   text-underline-offset: 3px;
   transition: all 0.2s ease;
 }
 
 .text-link:hover {
-  text-decoration-color: #00f0ff;
-  text-shadow: 0 0 6px rgba(0, 240, 255, 0.35);
+  text-decoration-color: var(--lottery-accent-strong, #7e4b1d);
 }
 
-/* ── Responsive ── */
 @media (max-width: 960px) {
   .inspector-shell {
     max-height: none;

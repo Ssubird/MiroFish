@@ -60,8 +60,9 @@ defineEmits(['select-node', 'select-number', 'toggle-maximize'])
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 1rem;
   height: 100%;
-  padding: 1.4rem;
-  background: #fff;
+  padding: 1.25rem;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.5), rgba(248, 239, 228, 0.68));
 }
 
 .stage-header,
@@ -86,16 +87,22 @@ defineEmits(['select-node', 'select-number', 'toggle-maximize'])
   margin: 0;
 }
 
-.eyebrow,
+.eyebrow {
+  font-size: 0.76rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lottery-accent-strong, #7e4b1d);
+}
+
 .subtitle,
 .stage-metrics {
-  color: #686868;
+  color: var(--lottery-muted, #6d5a48);
 }
 
 .stage-copy h2 {
-  font-size: 1.8rem;
+  font-size: 1.9rem;
   line-height: 1.05;
-  color: #121212;
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .subtitle {
@@ -107,26 +114,31 @@ defineEmits(['select-node', 'select-number', 'toggle-maximize'])
 .stage-btn,
 .stage-metrics span {
   border-radius: 999px;
-  border: 1px solid #e6e6e6;
-  background: #fafafa;
-  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: rgba(255, 255, 255, 0.66);
+  padding: 0.48rem 0.88rem;
 }
 
 .stage-pill,
 .stage-metrics span {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
+  color: var(--lottery-muted, #6d5a48);
+}
+
+.stage-pill {
+  color: var(--lottery-teal, #2f776b);
 }
 
 .stage-btn {
   cursor: pointer;
   font: inherit;
-  color: #121212;
+  color: var(--lottery-ink, #21180f);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .stage-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(18, 18, 18, 0.08);
+  box-shadow: 0 10px 24px rgba(77, 57, 33, 0.1);
 }
 
 .stage-stack {
@@ -144,7 +156,7 @@ defineEmits(['select-node', 'select-number', 'toggle-maximize'])
 
 .stage-stack::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(18, 18, 18, 0.14);
+  background: rgba(88, 66, 39, 0.16);
 }
 
 @media (max-width: 960px) {
@@ -153,7 +165,7 @@ defineEmits(['select-node', 'select-number', 'toggle-maximize'])
   }
 
   .stage-copy h2 {
-    font-size: 1.45rem;
+    font-size: 1.5rem;
   }
 }
 </style>

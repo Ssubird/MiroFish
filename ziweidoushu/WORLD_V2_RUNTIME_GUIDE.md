@@ -1,162 +1,227 @@
-# world_v2_market Runtime Guide
+# `world_v2_market` 运行维护与排障手册
 
-## Current State
+## 1. 当前运行模式
 
-`world_v2_market` is the active mainline runtime.
+`world_v2_market` 当前默认推荐使用：
 
-It now supports:
-
-- normal visible-through progression
-- settle-before-next-predict workflow
-- no-MCP local development baseline
-- Letta shared memory blocks for current-issue collaboration
-- Kuzu runtime projection with dirty-flagged flush
-
-## Running Modes
-
-Current runtime paths:
-
-- `Letta + MCP`
-  - full tool-enabled mode
 - `Letta + no-MCP`
-  - valid development baseline
-- `LocalWorldClient`
-  - local direct-call fallback for explicit no-MCP mode
 
-Important switch:
+这条基线的特点是：
 
-- `LOTTERY_WORLD_ALLOW_NO_MCP=true`
+- Letta 负责 agent 容器与消息发送
+- Agent Fabric 负责 prompt / 文档 / 共享块绑定
+- Kuzu 负责图谱同步和运行态投影
+- 默认不依赖 MCP 工具链参与 agent 决策
 
-Important files:
+## 2. 环境变量与 backend 模式
 
-- `backend/app/api/lottery.py`
-- `backend/app/services/lottery/research_service.py`
-- `backend/app/services/lottery/world_runtime_readiness.py`
-- `backend/app/services/lottery/local_world_client.py`
+关键环境变量：
 
-## Main Runtime Semantics
+- `LOTTERY_WORLD_ALLOW_NO_MCP`
+- `LOTTERY_WORLD_NO_MCP_BACKEND`
+- `LETTA_BASE_URL`
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL_NAME`
 
-The UI and API both operate on `visible_through_period`.
+`LOTTERY_WORLD_NO_MCP_BACKEND` 支持：
 
-Example:
+- `auto`
+- `letta`
+- `local`
 
-- choose `2026063`
-  - agents only see data up to `2026063`
-  - runtime predicts `2026064`
-- choose `2026064`
-  - if `2026064` actual numbers exist, runtime settles `2026064`
-  - then runtime predicts `2026065`
+默认解析逻辑：
 
-## Runtime Phases
+1. `LOTTERY_WORLD_ALLOW_NO_MCP=true`
+2. `LOTTERY_WORLD_NO_MCP_BACKEND` 未设置时按 `auto`
+3. `auto` 且存在 `LETTA_BASE_URL`
+   - 实际走 `letta_no_mcp`
+4. `auto` 且没有 `LETTA_BASE_URL`
+   - 实际走 `local_no_mcp`
 
-Prediction:
+## 3. 关键 API 检查
 
-1. `generator_opening`
-2. `social_propagation`
-3. `market_rerank`
-4. `plan_synthesis`
-5. `handbook_final_decision`
-6. `await_result`
+### 检查 runtime 是否 ready
 
-Settlement:
+```text
+GET /api/lottery/world/runtime-readiness
+```
 
-1. `settlement`
-2. `postmortem`
+### 检查执行注册表
 
-## Agent Flow
+```text
+GET /api/lottery/execution/registry
+```
 
-Generator stage:
+### 检查 Agent Fabric 解析结果
 
-- `data`
-- `metaphysics`
-- `hybrid`
+```text
+GET /api/lottery/agent-fabric/registry
+```
 
-These groups generate independently during `generator_opening`.
+### 推进一步 world
 
-Aggregation stage:
+```text
+POST /api/lottery/world/advance
+```
 
-- `social_consensus_feed`
-- `social_risk_feed`
-- `consensus_judge`
-- `purchase_chair`
-- `handbook_decider`
+## 4. Session 文件与产物位置
 
-This is the only place current-round cross-group convergence happens.
+运行态主要落在：
 
-## Shared Memory Blocks
+- [\.world_state](E:/MoFish/MiroFish/ziweidoushu/.world_state)
+- [reports](E:/MoFish/MiroFish/ziweidoushu/reports)
+- [generated](E:/MoFish/MiroFish/ziweidoushu/generated)
 
-Current blocks:
+常看文件：
+
+- `session.json`
+- `timeline.jsonl`
+- `result.json`
+
+关键顶层字段：
+
+- `current_phase`
+- `latest_purchase_plan`
+- `final_decision`
+- `resolved_execution_bindings`
+- `agent_state`
+
+## 5. 常见故障分诊顺序
+
+建议固定按这个顺序查：
+
+1. `runtime-readiness` 是否 ready
+2. Kuzu 是否已同步
+3. `agent-fabric/registry` 是否解析成了你预期的 roster
+4. `resolved_execution_bindings` 是否命中了你预期的 profile
+5. `agent_state[*].bound_prompt_docs` 是否包含你想发的文档
+6. `timeline.jsonl` 是否有明确的失败 phase 和错误内容
+
+## 6. `readiness` / 模型列表 / session failed
+
+### `runtime-readiness` 不 ready
+
+先查：
+
+- `LETTA_BASE_URL` 是否可访问
+- 默认 provider 是否可用
+- `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_NAME` 是否完整
+
+### 前端一开始读不到模型
+
+先查：
+
+- `GET /api/lottery/execution/registry`
+- `GET /api/lottery/world/runtime-readiness`
+
+当前前端会自动预热模型列表，但 provider 未 ready 时仍可能短暂显示空状态。
+
+### session 进入 `failed`
+
+优先看：
+
+- `session.error`
+- `execution_log`
+- `timeline.jsonl`
+
+不要先看文档，先看运行态里记录的失败 phase。
+
+## 7. Kuzu 检查
+
+Kuzu 在默认 no-MCP 主线里的职责是：
+
+- 工作区图谱同步
+- runtime projection
+- 前端图谱读模型
+
+它不是默认 no-MCP agent 工具链。
+
+要核对 Kuzu 是否正常：
+
+1. 看 `overview.kuzu_graph_status`
+2. 看前端 Kuzu 状态卡片
+3. 手动触发一次 `sync-kuzu`
+4. 再推进 world
+
+如果预测流程不动，先排除 Kuzu 未同步导致的前置状态问题。
+
+## 8. Shared Memory 检查
+
+最常见的共享块包括：
 
 - `current_issue`
-- `visible_draw_history_digest`
 - `market_board`
 - `social_feed`
 - `purchase_board`
 - `handbook_principles`
 - `final_decision_constraints`
-- `recent_outcomes`
-- `report_digest`
-- `rule_digest`
-- `purchase_budget`
 
-Meaning:
+如果怀疑 agent 没看到正确上下文，先查：
 
-- shared blocks carry current issue context
-- long documents still go through prompt assets / passages
-- runtime state transitions stay in `world_v2_runtime`
+- `world_session.shared_memory`
+- `agent_state[agent_id]`
 
-## Kuzu Position
+## 9. Prompt 注入与 bound docs 检查
 
-Kuzu is still important, but it should not dominate every phase.
+要确认某个 agent 实际绑定了什么，按这个顺序看：
 
-Current design:
+1. `GET /api/lottery/agent-fabric/registry`
+2. `session.agent_state[agent_id].bound_prompt_docs`
+3. `session.agent_state[agent_id].bound_prompt_passage_count`
+4. `session.agent_state[agent_id].prompt_sources`
 
-- sync workspace graph for prediction context
-- use runtime projection for market analysis
-- flush runtime projection only when needed
+当前默认重点 agent：
 
-Current performance fixes:
-
-- projection is dirty-flagged
-- do not project after every phase
-- flush at prediction close and settlement close
-- CSV import omits headers to avoid polluted graph nodes
-
-## Result Cache
-
-Current cache key:
-
-- `target_issue`
-- `agent_id`
-- `visible_history_hash`
-- `prompt_hash`
-- `config_hash`
-
-Current cached roles:
-
-- social
-- judge
 - `purchase_chair`
-- `handbook_decider`
+  - 绑定 `purchase_planner_doctrine.md`
+  - 绑定 `prompt.md`
+  - 绑定 `data/draws/keno8_predict_data.json`
+  - 绑定 `lottery_handbook_deep_notes.md`
+- `purchase_ziwei_conviction`
+  - 绑定 handbook
 
-## Reports
+默认 shipped 里，只有 `purchase_ziwei_conviction` 和 `purchase_chair` 会吃 handbook。
 
-Generated outputs include:
+## 10. 本地运行时排查链路
 
-- run report
-- issue ledger
-- fixed per-issue reports
+如果你怀疑 `local_no_mcp` 和 `letta_no_mcp` 行为不一致，建议：
 
-Per-issue report naming:
+1. 先看 `runtime-readiness` 返回的 `backend`
+2. 再看 session `execution_log` 里是 `letta_no_mcp_mode` 还是 `local_no_mcp_mode`
+3. 再核对同一个 agent 的 `bound_prompt_docs`
 
-- `issue_064_report.json`
-- `issue_064_report.md`
+当前默认 shipped `final_decision` 不是额外再调一个独立终判 agent；它是以 `purchase_chair` 为 owner，把 `final_plan` 收敛成 `final_decision`。如果你看到 token 消耗异常低，优先排查的是 prompt 绑定与实际发送内容，而不是去找一个不存在的默认终判层。
 
-Per-issue report sections:
+## 11. 无结果展示时怎么查
 
-1. `本期背景`
-2. `原始信号`
-3. `社交过程`
-4. `购买方案对比`
-5. `最终决策`
-6. `开奖后复盘`
+### 有 `latest_purchase_plan`，没有 `final_decision`
+
+说明问题大概率卡在 `final_decision` 阶段或它之前的状态写回。
+
+### 连 `latest_purchase_plan` 都没有
+
+优先查：
+
+- `social_propagation` 是否完成
+- `plan_synthesis` 是否失败
+- 购买人格是否有返回可执行方案
+
+### 前端图谱或阶段名不对
+
+优先查：
+
+- `session.current_phase`
+- `latest_prediction.coordination_trace`
+- 前端是否拿到了新的 `phaseLabel` 和 graph phase order
+
+## 12. 快速核对清单
+
+只想快速判断当前这轮是否正常，可以看这 6 项：
+
+1. `current_phase`
+2. `predicted_period`
+3. `latest_purchase_plan.status`
+4. `latest_prediction.final_decision.numbers`
+5. `resolved_execution_bindings.purchase_chair`
+6. `agent_state.purchase_chair.bound_prompt_docs`

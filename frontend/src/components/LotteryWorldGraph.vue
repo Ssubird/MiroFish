@@ -80,13 +80,12 @@ const GRAPH_HEIGHT = 520
 const PHASE_ORDER = [
   'generator_opening',
   'social_propagation',
-  'market_rerank',
   'plan_synthesis',
-  'handbook_final_decision',
+  'final_decision',
   'settlement',
   'postmortem'
 ]
-const GROUP_ORDER = ['data', 'metaphysics', 'hybrid', 'social', 'judge', 'purchase', 'decision']
+const GROUP_ORDER = ['data', 'metaphysics', 'hybrid', 'social', 'purchase']
 
 const props = defineProps({
   graph: { type: Object, default: () => ({ nodes: [], edges: [] }) },
@@ -192,15 +191,13 @@ function evenly(items, start, end) {
 <style scoped>
 .graph-shell {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.9rem;
   padding: 1.15rem;
   border-radius: 1.5rem;
-  border: 1px solid rgba(0, 240, 255, 0.12);
-  background: rgba(11, 12, 16, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4), inset 0 0 16px rgba(0, 240, 255, 0.04);
-  color: #e0e6ed;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: linear-gradient(180deg, rgba(255, 253, 249, 0.86), rgba(247, 241, 232, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .graph-header,
@@ -215,8 +212,8 @@ function evenly(items, start, end) {
 
 .graph-legend {
   justify-content: flex-start;
-  color: #8b9bb4;
-  font-size: 0.85rem;
+  color: var(--lottery-muted, #6d5a48);
+  font-size: 0.84rem;
 }
 
 .legend-dot {
@@ -227,10 +224,16 @@ function evenly(items, start, end) {
   margin-right: 0.3rem;
 }
 
-.legend-dot.agent { background: #5dd0ff; box-shadow: 0 0 6px rgba(93, 208, 255, 0.4); }
-.legend-dot.phase { background: #ffc14d; box-shadow: 0 0 6px rgba(255, 193, 77, 0.4); }
+.legend-dot.agent {
+  background: var(--lottery-teal, #2f776b);
+  box-shadow: 0 0 0 4px rgba(47, 119, 107, 0.12);
+}
 
-/* ── Empty State ── */
+.legend-dot.phase {
+  background: var(--lottery-accent, #a66a2c);
+  box-shadow: 0 0 0 4px rgba(166, 106, 44, 0.12);
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -243,37 +246,36 @@ function evenly(items, start, end) {
 .empty-icon {
   width: 5rem;
   height: 5rem;
-  color: #5dd0ff;
+  color: var(--lottery-teal, #2f776b);
   margin-bottom: 1.25rem;
   animation: subtleBreathe 3s ease-in-out infinite;
 }
 
 @keyframes subtleBreathe {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50%      { opacity: 0.8; transform: scale(1.05); }
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
 }
 
 .empty-title {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
-  color: #c8d6e5;
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .empty-hint {
   margin: 0.35rem 0 0;
-  color: #6b7c8e;
+  color: var(--lottery-muted, #6d5a48);
   font-size: 0.85rem;
 }
 
-/* ── Canvas ── */
 .graph-canvas {
   width: 100%;
   min-height: 28rem;
 }
 
 .graph-edge {
-  stroke: rgba(255, 255, 255, 0.15);
+  stroke: rgba(109, 90, 72, 0.22);
   stroke-width: 1.5;
 }
 
@@ -283,30 +285,30 @@ function evenly(items, start, end) {
 }
 
 .node-core {
-  fill: rgba(0, 240, 255, 0.15);
-  stroke: rgba(0, 240, 255, 0.3);
+  fill: rgba(47, 119, 107, 0.12);
+  stroke: rgba(47, 119, 107, 0.32);
   stroke-width: 2;
   transition: all 0.25s ease;
 }
 
 .graph-node:hover .node-core {
-  fill: rgba(0, 240, 255, 0.25);
-  stroke: rgba(0, 240, 255, 0.6);
+  fill: rgba(47, 119, 107, 0.18);
+  stroke: rgba(47, 119, 107, 0.48);
 }
 
 .graph-node.phase .node-core {
-  fill: rgba(255, 193, 77, 0.15);
-  stroke: rgba(255, 193, 77, 0.4);
+  fill: rgba(166, 106, 44, 0.14);
+  stroke: rgba(166, 106, 44, 0.36);
 }
 
 .graph-node.phase:hover .node-core {
-  fill: rgba(255, 193, 77, 0.25);
-  stroke: rgba(255, 193, 77, 0.7);
+  fill: rgba(166, 106, 44, 0.22);
+  stroke: rgba(166, 106, 44, 0.56);
 }
 
 .graph-node.selected .node-core,
 .graph-node.active .node-core {
-  stroke: #ffffff;
+  stroke: var(--lottery-panel-ink, #2f251a);
   stroke-width: 2.5;
   filter: url(#glow);
 }
@@ -320,24 +322,27 @@ function evenly(items, start, end) {
 }
 
 .node-title {
-  fill: #fff;
+  fill: var(--lottery-panel-ink, #2f251a);
   font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .node-meta {
-  fill: #8b9bb4;
+  fill: var(--lottery-muted, #6d5a48);
   font-size: 0.7rem;
 }
 
-.eyebrow { color: #8b9bb4; }
+.eyebrow {
+  color: var(--lottery-accent-strong, #7e4b1d);
+}
 
 .graph-header h2 {
-  color: #fff;
+  color: var(--lottery-panel-ink, #2f251a);
   font-size: 1.3rem;
 }
 
 .graph-metrics span {
   font-size: 0.82rem;
-  color: #6b7c8e;
+  color: var(--lottery-muted, #6d5a48);
 }
 </style>

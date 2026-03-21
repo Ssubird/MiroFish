@@ -16,9 +16,8 @@ V1_PHASE_ORDER = (
 V2_PHASE_ORDER = (
     "generator_opening",
     "social_propagation",
-    "market_rerank",
     "plan_synthesis",
-    "handbook_final_decision",
+    "final_decision",
     "settlement",
     "postmortem",
 )
@@ -28,10 +27,9 @@ PHASE_LABELS = {
     "public_debate": "Debate",
     "social_propagation": "Social Propagation",
     "judge_synthesis": "Judge Synthesis",
-    "market_rerank": "Market Rerank",
     "purchase_committee": "Purchase Committee",
     "plan_synthesis": "Plan Synthesis",
-    "handbook_final_decision": "Handbook Final Decision",
+    "final_decision": "Final Decision",
     "settlement": "Settlement",
     "postmortem": "Postmortem",
 }
@@ -113,11 +111,11 @@ def _phase_nodes(nodes: dict[str, dict[str, Any]], session: dict[str, Any], peri
 
 
 def _phase_numbers(phase: str, latest_summary: dict[str, Any], purchase: dict[str, Any], final_decision: dict[str, Any], settlement: list[dict[str, Any]]) -> list[int]:
-    if phase in {"opening", "generator_opening", "public_debate", "social_propagation", "judge_synthesis", "market_rerank"}:
+    if phase in {"opening", "generator_opening", "public_debate", "social_propagation", "judge_synthesis"}:
         return list(latest_summary.get("primary_numbers", [])) + list(latest_summary.get("alternate_numbers", []))
     if phase == "plan_synthesis":
         return list(purchase.get("primary_prediction", [])) + list(purchase.get("alternate_numbers", []))
-    if phase == "handbook_final_decision":
+    if phase == "final_decision":
         return list(final_decision.get("numbers", [])) + list(final_decision.get("alternate_numbers", []))
     if phase == "settlement" and settlement:
         return list(settlement[-1].get("actual_numbers", []))
@@ -127,7 +125,7 @@ def _phase_numbers(phase: str, latest_summary: dict[str, Any], purchase: dict[st
 def _phase_summary(phase: str, latest_summary: dict[str, Any], purchase: dict[str, Any], final_decision: dict[str, Any], settlement: list[dict[str, Any]]) -> str:
     if phase == "plan_synthesis":
         return f"{purchase.get('plan_type', '-')} / play {purchase.get('play_size', '-')}"
-    if phase == "handbook_final_decision":
+    if phase == "final_decision":
         return str(final_decision.get("rationale", "")).strip() or "Official final decision"
     if phase == "settlement" and settlement:
         item = settlement[-1]
@@ -149,26 +147,23 @@ def _event_edges(nodes: dict[str, dict[str, Any]], edges: dict[str, dict[str, An
             _edge(edges, source, phase_nodes["generator_opening" if is_v2 else "opening"], "proposed")
         if event_type in {"live_interview", "social_post", "social_reply"} and is_v2:
             _edge(edges, source, phase_nodes["social_propagation"], "proposed")
-        if event_type == "market_rank" and is_v2:
-            _edge(edges, source, phase_nodes["market_rerank"], "ranked")
         if event_type == "purchase_decision":
             _edge(edges, source, phase_nodes["plan_synthesis" if is_v2 else "purchase_committee"], "purchased_from")
         if event_type == "official_prediction" and is_v2:
-            _edge(edges, source, phase_nodes["handbook_final_decision"], "decided")
+            _edge(edges, source, phase_nodes["final_decision"], "decided")
 
 
 def _phase_edges(edges: dict[str, dict[str, Any]], session: dict[str, Any], phase_nodes: dict[str, str], period: str) -> None:
     if _is_v2_session(session):
-        _edge(edges, phase_nodes["generator_opening"], phase_nodes["market_rerank"], "synthesized_into")
-        _edge(edges, phase_nodes["social_propagation"], phase_nodes["market_rerank"], "synthesized_into")
-        _edge(edges, phase_nodes["market_rerank"], phase_nodes["plan_synthesis"], "synthesized_into")
-        _edge(edges, phase_nodes["plan_synthesis"], phase_nodes["handbook_final_decision"], "synthesized_into")
+        _edge(edges, phase_nodes["generator_opening"], phase_nodes["social_propagation"], "synthesized_into")
+        _edge(edges, phase_nodes["social_propagation"], phase_nodes["plan_synthesis"], "synthesized_into")
+        _edge(edges, phase_nodes["plan_synthesis"], phase_nodes["final_decision"], "synthesized_into")
     else:
         _edge(edges, phase_nodes["opening"], phase_nodes["judge_synthesis"], "synthesized_into")
         _edge(edges, phase_nodes["public_debate"], phase_nodes["judge_synthesis"], "synthesized_into")
         _edge(edges, phase_nodes["purchase_committee"], phase_nodes["judge_synthesis"], "purchased_from")
     if _settlement_for_period(session, period):
-        source_phase = "handbook_final_decision" if _is_v2_session(session) else "judge_synthesis"
+        source_phase = "final_decision" if _is_v2_session(session) else "judge_synthesis"
         _edge(edges, phase_nodes[source_phase], phase_nodes["settlement"], "settled_by")
         _edge(edges, phase_nodes["settlement"], phase_nodes["postmortem"], "settled_by")
 

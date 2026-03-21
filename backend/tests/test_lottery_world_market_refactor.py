@@ -270,20 +270,118 @@ def test_market_runtime_keeps_only_expected_agents_and_binds_handbook():
     assert "handbook_decider" not in agent_ids
     assert "social_consensus_feed" in agent_ids
     assert "social_risk_feed" not in agent_ids
-    assert "consensus_judge" in agent_ids
+    assert "consensus_judge" not in agent_ids
     assert "world_analyst" not in agent_ids
     assert not any(agent_id.startswith("bettor_") for agent_id in agent_ids)
     assert "bettor_handbook_advisor" not in agent_ids
     for agent_id in (
-        "letta_social_consensus_feed",
-        "letta_consensus_judge",
-        "letta_purchase_value_guard",
-        "letta_purchase_coverage_builder",
         "letta_purchase_ziwei_conviction",
         "letta_purchase_chair",
     ):
         handbook_block = fake_client.blocks[agent_id]["handbook_principles"]
         assert "lottery_handbook_deep_notes.md" in handbook_block
+    for agent_id in (
+        "letta_social_consensus_feed",
+        "letta_purchase_value_guard",
+        "letta_purchase_coverage_builder",
+    ):
+        assert "handbook_principles" not in fake_client.blocks[agent_id]
+
+
+def test_market_runtime_phase_chain_uses_purchase_mainline():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        service, _, _ = _service(temp_dir)
+        result = service.advance_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            agent_dialogue_enabled=False,
+            live_interview_enabled=False,
+        )
+
+    stages = [item["stage"] for item in result["pending_prediction"]["coordination_trace"]]
+
+    assert stages == [
+        "generator_opening",
+        "social_propagation",
+        "plan_synthesis",
+        "final_decision",
+    ]
+
+
+def test_market_runtime_only_bootstraps_live_market_agents_by_default():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        service, _, _ = _service(temp_dir)
+        result = service.advance_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            agent_dialogue_enabled=False,
+            live_interview_enabled=False,
+        )
+        session = service.get_world_session(result["world_session"]["session_id"])
+
+    strategy_rows = [item for item in session["session"]["agents"] if item["role_kind"] == "strategy"]
+    live_rows = [item for item in session["session"]["agents"] if item["letta_agent_id"] != "-"]
+
+    assert all(item["letta_agent_id"] == "-" for item in strategy_rows)
+    assert sorted(item["session_agent_id"] for item in live_rows) == [
+        "purchase_chair",
+        "purchase_coverage_builder",
+        "purchase_value_guard",
+        "purchase_ziwei_conviction",
+        "social_consensus_feed",
+    ]
+    assert result["world_session"]["request_metrics"]["create_agent"] == 5
+
+
+def test_agent_fabric_registry_ships_purchase_mainline_only():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        service, _, _ = _service(temp_dir)
+        registry = service.get_agent_fabric_registry()["registry"]
+
+    assert [item["phase_id"] for item in registry["phases"]] == [
+        "social_propagation",
+        "plan_synthesis",
+        "final_decision",
+    ]
+    assert [item["group_id"] for item in registry["groups"]] == [
+        "social",
+        "purchase",
+    ]
+    assert sorted(item["agent_id"] for item in registry["agents"]) == [
+        "purchase_chair",
+        "purchase_coverage_builder",
+        "purchase_value_guard",
+        "purchase_ziwei_conviction",
+        "social_consensus_feed",
+    ]
+
+
+def test_prepare_world_session_can_force_new_session():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        service, _, _ = _service(temp_dir)
+        first = service.prepare_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            force_new_session=False,
+        )
+        second = service.prepare_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            force_new_session=False,
+        )
+        third = service.prepare_world_session(
+            pick_size=5,
+            strategy_ids=["cold_rule", "hot_rule"],
+            issue_parallelism=1,
+            force_new_session=True,
+        )
+
+    assert second["world_session"]["session_id"] == first["world_session"]["session_id"]
+    assert third["world_session"]["session_id"] != first["world_session"]["session_id"]
 
 
 def test_world_reports_write_issue_ledger_and_issue_report():

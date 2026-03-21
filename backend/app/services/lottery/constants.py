@@ -46,9 +46,8 @@ WORLD_PHASES = (
 WORLD_V2_PHASES = (
     "generator_opening",
     "social_propagation",
-    "market_rerank",
     "plan_synthesis",
-    "handbook_final_decision",
+    "final_decision",
     "settlement",
     "postmortem",
 )

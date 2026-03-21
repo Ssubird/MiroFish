@@ -1,144 +1,161 @@
-# Lottery World Usage
+# `world_v2_market` 日常使用手册
 
-## Current Runtime
+## 1. 当前主运行时
 
-- primary runtime: `world_v2_market`
-- public action: `POST /api/lottery/world/advance`
-- setup endpoint: `POST /api/lottery/world/prepare`
-- execution catalog: `GET /api/lottery/execution/registry`
-- removed: `/api/lottery/world/evolution`
-- removed: `iterations`
-- kept: `agent_dialogue_rounds`
-- frontend discussion rounds max: `5`
-
-## Visible-Through Workflow
-
-The period selector means `visible_through_period`.
-
-Rules:
-
-- select `2026063`
-  - visible data ends at `2026063`
-  - the system predicts `2026064`
-  - `2026064` actual numbers remain hidden
-- select `2026064` next time
-  - if `2026064` actual data already exists, the system first settles and postmortems `2026064`
-  - then it predicts `2026065`
-
-Repeated clicks on the same `visible_through_period` with unchanged draw data do not create duplicate predictions or duplicate hit records.
-
-## Runtime Phases
-
-Prediction cycle:
+当前默认运行模式是 `world_v2_market`。默认主线阶段为：
 
 1. `generator_opening`
 2. `social_propagation`
-3. `market_rerank`
-4. `plan_synthesis`
-5. `handbook_final_decision`
-6. `await_result`
+3. `plan_synthesis`
+4. `final_decision`
+5. `await_result`
+6. `settlement`
+7. `postmortem`
 
-Settlement cycle:
-
-1. `settlement`
-2. `postmortem`
-
-## Agent Layout
-
-Generator layer:
-
-- `cold_50`
-- `miss_120`
-- `momentum_60`
-- `structure_90`
-- `recent_board_50`
-- `metaphysics_fused_board`
-- `hybrid_fused_board`
-
-Market layer:
+默认 shipped 的 LLM 角色只有：
 
 - `social_consensus_feed`
-- `social_risk_feed`
-- `consensus_judge`
+- `purchase_value_guard`
+- `purchase_coverage_builder`
+- `purchase_ziwei_conviction`
 - `purchase_chair`
 
-Official final decision:
+`purchase_chair` 会在 `plan_synthesis` 收口购买方案，并在 `final_decision` 产出最终预测。当前 shipped 主线没有默认 `judge` 层，也没有单独的 `decision` 层。
 
-- `handbook_decider`
+## 2. 入口接口
 
-Removed runtime roles:
+### 推进 world
 
-- all bettor personas
-- `bettor_handbook_advisor`
-- `world_analyst`
-- `hybrid_resonance_160`
-- `hybrid_bridge_100`
-- `llm_hybrid_panel`
+- `POST /api/lottery/world/start`
+  - 创建或续跑 session，本质上会进入同一套推进逻辑
+- `POST /api/lottery/world/advance`
+  - 推进一轮主线；如果上一轮已可结算，会先结算再推进下一轮
 
-## Execution Bindings
+### 查询配置与运行状态
 
-Execution defaults come from `backend/app/services/lottery/execution_config.yaml`.
+- `GET /api/lottery/execution/registry`
+  - 查看 provider / model / profile 注册表
+- `GET /api/lottery/agent-fabric/registry`
+  - 查看当前 Agent Fabric 解析结果与导出快照
+- `GET /api/lottery/world/runtime-readiness`
+  - 查看当前 runtime backend、模型可用性、Kuzu 状态等
 
-The system resolves bindings in this order:
+## 3. `visible_through_period` 的语义
 
-1. role default
-2. group override
-3. agent override
-4. session `execution_overrides`
+`visible_through_period` 决定这轮 world 能看见的历史上界。
 
-Rules:
+规则是：
 
-- the UI selects `profile_id`
-- UI overrides apply to the current session only
-- YAML remains the source of persistent defaults
-- no adaptive provider or model selection is used
+- world 只能读取 `<= visible_through_period` 的已开奖历史
+- 下一期目标默认是“`visible_through_period` 之后的第一期”
+- `settlement` 只会在该目标期已经开奖时发生
 
-Current Local/no-MCP runtime can enforce per-agent bindings.
-Letta currently mirrors binding metadata only.
+例子：
 
-## Signal Boards
+- `visible_through_period=2026065`
+  - world 只能看见到 `2026065`
+  - 默认预测 `2026066`
 
-The canonical market surface is `SignalBoard`.
+## 4. 当前阶段职责
 
-Generators may still emit `StrategyPrediction`, but runtime adapts them into boards before the market stage.
+### `generator_opening`
 
-Boards carry at least:
+- 运行 Python generator 组
+- 产出 `signal_boards`
+- 刷新共享块里的初始 `market_board`
 
-- number scores
-- structure scores
-- play-size scores
-- crowding penalties
-- payout surrogates
-- exclusions
-- evidence refs
-- confidence
-- rationale
+### `social_propagation`
 
-## Handbook Alignment
+- 由 `social_consensus_feed` 把 generator 板面压缩为市场摘要
+- 写入 `social_feed`
+- 把 `market_board` 刷新成可供购买层消费的市场摘要版
 
-The runtime now separates:
+### `plan_synthesis`
 
-- draw signal
-- anti-crowding
-- payout surrogate
-- pattern risk
+- 3 个购买人格分别给出可执行购买方案
+- `purchase_chair` 读取人格方案与共享板面，收口为 `final_plan`
+- 写入 `purchase_board`
 
-Handbook penalties include:
+### `final_decision`
 
-- arithmetic progression
-- symmetry
-- geometric pattern
-- prior-winning-copy
-- shifted-winning-copy
-- hot/cold narrative
-- omission chasing
-- beautiful math pattern
+- 默认 shipped 逻辑不再引入额外的终判 agent
+- runtime 以 `purchase_chair` 为 owner，把 `final_plan` 收敛成 `final_decision`
+- 这一阶段会写出最终主号、备选号、采用的策略组和最终理由
 
-These features are filters and value surrogates, not “more likely to draw” claims.
+### `await_result`
 
-## Shared Memory Blocks
+- 说明本轮预测已完成，等待开奖
 
-Current Letta shared blocks:
+### `settlement`
+
+- 目标期开奖后对 `final_decision` 与购买方案进行结算
+
+### `postmortem`
+
+- 生成最新复盘结果，更新 `issue_ledger` 和报告产物
+
+## 5. 当前 agent 布局简表
+
+### 市场摘要层
+
+- `social_consensus_feed`
+  - `group: social`
+  - `phase: social_propagation`
+  - 只负责压缩市场主叙事，不负责买票
+
+### 购买人格层
+
+- `purchase_value_guard`
+  - 偏价值密度与防拥挤
+- `purchase_coverage_builder`
+  - 偏覆盖效率与票型结构
+- `purchase_ziwei_conviction`
+  - 偏紫微信号与混合 conviction
+
+### 主席层
+
+- `purchase_chair`
+  - `phases: [plan_synthesis, final_decision]`
+  - 负责收口 `final_plan`
+  - 负责产出 `final_decision`
+  - 当前也是默认最终 owner
+
+## 6. 执行绑定与模型 / Provider 选择
+
+模型和 provider 的注册仍由：
+
+- [execution_config.yaml](E:/MoFish/MiroFish/backend/app/services/lottery/execution_config.yaml)
+- 环境变量中的 `LLM_*`
+
+共同决定。
+
+Agent Fabric 只在 agent 级别引用 `profile_id`。运行时解析后的结果会写进 session 的：
+
+- `resolved_execution_bindings`
+
+前端里要区分两层：
+
+- “默认模型”下拉
+  - 影响默认 provider 路线
+- `Execution Bindings`
+  - 用于按 group 或按 agent 覆盖 profile
+
+默认 shipped group 只显示：
+
+- `data`
+- `metaphysics`
+- `hybrid`
+- `social`
+- `purchase`
+
+## 7. Signal Board / Shared Memory / Result Line
+
+### `signal_boards`
+
+- generator 层的标准输出面
+- 是购买主线最底层的原始信号面
+
+### 关键 shared memory
 
 - `current_issue`
 - `visible_draw_history_digest`
@@ -147,138 +164,91 @@ Current Letta shared blocks:
 - `purchase_board`
 - `handbook_principles`
 - `final_decision_constraints`
-- `recent_outcomes`
 - `report_digest`
 - `rule_digest`
 - `purchase_budget`
 
-State machine logic stays in `world_v2_runtime`. Shared blocks only carry current-issue context.
+### 关键结果字段
 
-## Game Kernel
+- `latest_purchase_plan`
+  - 当前主购买方案
+- `latest_prediction.final_decision`
+  - 当前官方最终预测
+- `resolved_execution_bindings`
+  - 当前 session 的实际执行绑定
+- `agent_state`
+  - 每个 agent 的最近活动、绑定文档与执行信息
 
-Happy8 currently runs through:
+## 8. 本地开发与 no-MCP
 
-- `games/base.py`
-- `games/happy8/definition.py`
-- `games/happy8/features.py`
+默认建议使用 `Letta + no-MCP`。
 
-This layer owns:
+关键环境变量：
 
-- selection validation
-- plan expansion
-- pricing
-- settlement
-- feature extraction
+- `LOTTERY_WORLD_ALLOW_NO_MCP=true`
+- `LOTTERY_WORLD_NO_MCP_BACKEND=auto|letta|local`
+- `LETTA_BASE_URL=...`
 
-## Result Lines
+默认选择逻辑：
 
-Two result lines are explicit:
+- `LOTTERY_WORLD_NO_MCP_BACKEND` 未设置时，默认是 `auto`
+- 如果 `auto` 且存在 `LETTA_BASE_URL`，实际走 `letta_no_mcp`
+- 如果 `auto` 且没有 `LETTA_BASE_URL`，才走 `local_no_mcp`
 
-- official prediction line: `handbook_decider`
-- purchase ROI line: `purchase_chair`
+Kuzu 在 no-MCP 模式下依然会用到，但用途是：
 
-`latest_purchase_plan` means purchase recommendation only. It is not the official final prediction.
+- 工作区图谱同步
+- runtime projection
+- 前端图谱观察面
 
-## Reports
+不是默认 agent 工具链。
 
-Each run still writes a timestamped run report.
+## 9. 常用 API 示例
 
-Per settled issue the system also writes:
+### 新开或续跑一轮
 
-- `reports/lottery-issue-ledger.json`
-- `reports/lottery-issue-ledger.md`
-- `reports/issues/issue_<suffix>_report.json`
-- `reports/issues/issue_<suffix>_report.md`
-
-Example:
-
-- `reports/issues/issue_064_report.json`
-- `reports/issues/issue_064_report.md`
-
-Each per-issue report uses six fixed sections:
-
-1. `本期背景`
-2. `原始信号`
-3. `社交过程`
-4. `购买方案对比`
-5. `最终决策`
-6. `开奖后复盘`
-
-## Kuzu Runtime Use
-
-Kuzu is kept as an analysis substrate.
-
-Current rules:
-
-- workspace graph is synced for prediction context
-- runtime projection is dirty-flagged
-- projection flush happens at round close, not after every phase
-- CSV import no longer writes headers into copied payloads
-
-## Result Cache
-
-Heavy agent outputs are cached by:
-
-- `target_issue`
-- `agent_id`
-- `visible_history_hash`
-- `prompt_hash`
-- `config_hash`
-
-This cache is used for social, judge, `purchase_chair`, and `handbook_decider`.
-
-## no-MCP Development
-
-`world_v2_market` can run without MCP.
-
-Key pieces:
-
-- env switch: `LOTTERY_WORLD_ALLOW_NO_MCP=true`
-- direct local client: `LocalWorldClient`
-- readiness branch: `world_runtime_readiness.py`
-
-MCP still adds tools, but it is not required to start the runtime.
-
-## API Example
-
-```powershell
-$body = @{
-  strategy_ids = @("cold_rule", "hot_rule")
-  pick_size = 5
-  issue_parallelism = 1
-  agent_dialogue_enabled = $true
-  agent_dialogue_rounds = 5
-  live_interview_enabled = $false
-  visible_through_period = "2026063"
-  execution_overrides = @{
-    group = @{
-      social = "social_fast_json"
-    }
-    agent = @{
-      handbook_decider = "decision_default"
-    }
-  }
-} | ConvertTo-Json -Depth 6
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:5001/api/lottery/world/advance" `
-  -ContentType "application/json" `
-  -Body $body
+```json
+POST /api/lottery/world/advance
+{
+  "runtime_mode": "world_v2_market",
+  "pick_size": 5,
+  "budget_yuan": 50,
+  "visible_through_period": "2026065",
+  "strategy_ids": ["cold_rule", "hot_rule"]
+}
 ```
 
-## Local Dev
+### 查看 Agent Fabric
 
-Backend:
-
-```powershell
-cd backend
-python -m flask --app app run --debug --port 5001
+```text
+GET /api/lottery/agent-fabric/registry
 ```
 
-Frontend:
+### 查看执行注册表
 
-```powershell
-cd frontend
-npm.cmd run dev
+```text
+GET /api/lottery/execution/registry
 ```
+
+## 10. 常见日常操作流程
+
+### 跑一轮预测
+
+1. 先确认 `runtime-readiness` 为 ready
+2. 选择 `visible_through_period`
+3. 检查预算和执行绑定
+4. 调 `world/advance`
+5. 查看 `latest_prediction.final_decision`
+
+### 查看当前 agent 实际吃了什么
+
+1. 打开 `GET /api/lottery/agent-fabric/registry`
+2. 看目标 agent 的 `prompt assets`
+3. 再看 session 的 `agent_state[agent_id].bound_prompt_docs`
+4. 如果需要核对实际发送 prompt，检查运行日志和本地 runtime 记录
+
+### 切换不同 provider
+
+1. 在 `.env` 或 `execution_config.yaml` 中注册 provider / profile
+2. 用 `Execution Bindings` 按 group 或 agent 绑定 `profile_id`
+3. 查看 session 中的 `resolved_execution_bindings` 是否符合预期

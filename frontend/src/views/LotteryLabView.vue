@@ -4,8 +4,8 @@
       <div class="header-left">
         <button type="button" class="brand-btn" @click="router.push('/')">MIROFISH</button>
         <div class="page-copy">
-          <span class="page-label">ZIWEI HAPPY 8</span>
-          <strong>市场持续世界实验台</strong>
+          <span class="page-label">ZIWEI DOUSHU STUDIO</span>
+          <strong>紫微斗数 · 快乐 8 持续世界实验台</strong>
         </div>
       </div>
 
@@ -38,10 +38,26 @@
     </header>
 
     <div class="summary-strip">
-      <span>会话 {{ sessionRecord?.session_id || '-' }}</span>
-      <span>可见截止 {{ visibleThroughPeriod || latestPrediction?.visible_through_period || '-' }}</span>
-      <span>预测目标 {{ latestPrediction?.predicted_period || '-' }}</span>
-      <span>当前模型 {{ activeModelName || selectedModelName || '-' }}</span>
+      <article class="summary-tile">
+        <small>会话编号</small>
+        <strong>{{ sessionRecord?.session_id || '-' }}</strong>
+      </article>
+      <article class="summary-tile">
+        <small>当前阶段</small>
+        <strong>{{ phaseLabel(sessionRecord?.current_phase) }}</strong>
+      </article>
+      <article class="summary-tile">
+        <small>可见截止</small>
+        <strong>{{ visibleThroughPeriod || latestPrediction?.visible_through_period || '-' }}</strong>
+      </article>
+      <article class="summary-tile">
+        <small>预测目标</small>
+        <strong>{{ latestPrediction?.predicted_period || '-' }}</strong>
+      </article>
+      <article class="summary-tile">
+        <small>执行模型</small>
+        <strong>{{ activeModelName || selectedModelName || '-' }}</strong>
+      </article>
     </div>
 
     <div v-if="error && !errorDismissed" class="error-banner">
@@ -83,6 +99,7 @@
           @update:budgetYuan="budgetYuan = $event"
           @update:llmParallelism="llmParallelism = $event"
           @update:agentDialogueRounds="agentDialogueRounds = $event"
+          @update:startNewSession="startNewSession = $event"
           @update:visibleThroughPeriod="visibleThroughPeriod = $event"
           @update:liveInterviewEnabled="liveInterviewEnabled = $event"
           @update:selectedModelName="selectedModelName = $event"
@@ -132,6 +149,7 @@ const {
   budgetYuan,
   llmParallelism,
   agentDialogueRounds,
+  startNewSession,
   visibleThroughPeriod,
   historyPeriods,
   liveInterviewEnabled,
@@ -221,6 +239,7 @@ const controlPanelProps = computed(() => ({
   budgetYuan: budgetYuan.value,
   llmParallelism: llmParallelism.value,
   agentDialogueRounds: agentDialogueRounds.value,
+  startNewSession: startNewSession.value,
   visibleThroughPeriod: visibleThroughPeriod.value,
   historyPeriods: historyPeriods.value,
   liveInterviewEnabled: liveInterviewEnabled.value,

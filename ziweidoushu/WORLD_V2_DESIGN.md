@@ -1,196 +1,138 @@
-# World V2.5 Design
+# `world_v2_market` 设计说明
 
-## Goal
+## 1. 设计目标与边界
 
-Keep `world_v2_market`, but upgrade it into a clearer execution market:
+`world_v2_market` 的目标不是做一个“所有角色都能无限扩张的论坛”，而是稳定产出面向购买决策的主线结果。
 
-- explicit issue progression
-- explicit per-agent execution binding
-- canonical signal boards
-- handbook-aligned anti-crowding logic
-- Happy8-first game kernel boundary
+当前默认 shipped 设计目标是：
 
-## Runtime Entry
+- generator 负责产出原始信号面
+- social 负责压缩市场主叙事
+- purchase 负责提出并收口购买方案
+- `purchase_chair` 负责最终预测 owner
 
-Public endpoints:
+因此默认 shipped 主线被收口为：
 
-- `POST /api/lottery/world/prepare`
+`generator_opening -> social_propagation -> plan_synthesis -> final_decision -> await_result -> settlement -> postmortem`
+
+## 2. 运行时入口与状态推进
+
+外部入口保持不变：
+
+- `POST /api/lottery/world/start`
 - `POST /api/lottery/world/advance`
-- `GET /api/lottery/execution/registry`
 
-Core inputs:
+内部推进上：
 
-- `visible_through_period`
-- `agent_dialogue_rounds`
-- `execution_overrides`
+1. 先确定可见历史窗口和目标期
+2. 同步 Kuzu 工作区图谱
+3. 构造本轮 context、加载 Agent Fabric、注册 session agents
+4. 依次推进主线 phase
+5. 如果目标期已经开奖，则执行 `settlement` 和 `postmortem`
 
-Removed:
+## 3. 可见期模型
 
-- `/api/lottery/world/evolution`
-- `iterations`
+系统以 `visible_through_period` 作为唯一历史可见边界。
 
-## Visible-Through Model
+这个模型的意义是：
 
-`visible_through_period` means the last issue agents may see.
+- 明确避免未来开奖泄漏
+- 保证预测和结算都以同一条时间线前进
+- 让回测、单轮推进、人工续跑都共用同一套语义
 
-Example:
+## 4. 阶段流转与职责分层
 
-- visible through `2026063`
-  - visible data ends at `2026063`
-  - the runtime predicts `2026064`
-- visible through `2026064`
-  - if `2026064` draw data already exists, the runtime settles and postmortems `2026064`
-  - then it predicts `2026065`
+### `generator_opening`
 
-Repeated clicks on the same visible-through issue with unchanged draw data do not create duplicate predictions or duplicate settlement records.
+- 运行 Python generator 策略
+- 产出 `signal_boards`
+- 不做购买结论
 
-## Phase Flow
+### `social_propagation`
 
-Prediction cycle:
+- 由 `social_consensus_feed` 汇总市场主叙事
+- 把 generator 输出压缩成购买层易消费的摘要
 
-1. `generator_opening`
-2. `social_propagation`
-3. `market_rerank`
-4. `plan_synthesis`
-5. `handbook_final_decision`
-6. `await_result`
+### `plan_synthesis`
 
-Settlement cycle:
+- 购买人格分别给出可执行购买方案
+- `purchase_chair` 汇总为 `final_plan`
 
-1. `settlement`
-2. `postmortem`
+### `final_decision`
 
-## Generator Isolation
+- 默认 shipped 逻辑不新增额外终判层
+- runtime 以 `purchase_chair` 为 owner，把 `final_plan` 收敛成 `final_decision`
 
-Generation is isolated by group.
+### `await_result / settlement / postmortem`
 
-Rules:
+- 等待开奖
+- 结算
+- 复盘
 
-- data, metaphysics, and hybrid groups generate independently
-- groups do not read each other's same-round outputs during `generator_opening`
-- cross-group aggregation begins only in the market stage
+## 5. Generator 隔离原则
 
-Current groups:
+generator 组始终是 Python 规则侧。
 
-- `data`
-  - `cold_50`
-  - `miss_120`
-  - `momentum_60`
-  - `structure_90`
-  - `recent_board_50`
-- `metaphysics`
-  - `metaphysics_fused_board`
-- `hybrid`
-  - `hybrid_fused_board`
+它们的边界是：
 
-## Market Roles
+- 只负责各自板面
+- 不直接消费 Fabric LLM 角色
+- 在 `generator_opening` 之前彼此隔离
 
-Boards converge only in the market stage.
+这样做的目的，是让“原始信号面”和“市场 / 购买解释层”清楚分开。
 
-Roles:
+## 6. 当前市场角色结构
+
+默认 shipped 角色如下：
 
 - `social_consensus_feed`
-- `social_risk_feed`
-- `consensus_judge`
+- `purchase_value_guard`
+- `purchase_coverage_builder`
+- `purchase_ziwei_conviction`
 - `purchase_chair`
-- `handbook_decider`
 
-Responsibilities:
+默认 shipped 只有两个活跃 group：
 
-- social roles amplify, question, and warn about signal boards
-- judge re-ranks and compresses the market picture
-- purchase chair produces executable purchase structures
-- handbook decider publishes the official final decision
+- `social`
+- `purchase`
 
-## Execution Fabric
+当前没有默认 shipped 的 `judge` 与 `decision` 层。
 
-Execution binding is explicit. There is no adaptive provider or model selection.
+## 7. Agent Fabric 作为唯一真相源
 
-Persistent defaults come from `execution_config.yaml`:
+当前运行时应以以下两类文件作为默认真相源：
 
-- `providers`
-- `models`
-- `profiles`
-- `role_defaults`
-- `group_overrides`
-- `agent_overrides`
-- `decision_weights`
-- `happy8_feature_profile`
+- [manifest.yaml](E:/MoFish/MiroFish/ziweidoushu/agent_fabric/manifest.yaml)
+- [agents](E:/MoFish/MiroFish/ziweidoushu/agent_fabric/agents)
 
-Binding precedence:
+它们负责：
 
-1. role default
-2. group override
-3. agent override
-4. session `execution_overrides`
+- phase 顺序
+- group 默认可见性与 shared memory
+- agent roster
+- prompt blocks
+- document refs
+- `profile_id`
 
-Rules:
+`catalog.py` 只负责消费已解析出的 Fabric 结果与 Python generator，不再维护另一套默认主线语义。
 
-- the UI selects `profile_id`, not raw provider/model text
-- the UI only writes session-scoped overrides
-- session overrides never rewrite YAML
-- resolved bindings are stored in session payloads, reports, and execution logs
+## 8. Execution Fabric / Provider 绑定
 
-Current runtime scope:
+模型执行绑定仍由：
 
-- Local/no-MCP execution enforces per-agent provider/model binding
-- Letta currently carries aligned binding metadata only
-- Letta does not yet execute different providers per agent in this phase
+- [execution_registry.py](E:/MoFish/MiroFish/backend/app/services/lottery/execution_registry.py)
+- [execution_config.yaml](E:/MoFish/MiroFish/backend/app/services/lottery/execution_config.yaml)
+- 环境变量 `LLM_*`
 
-## Signal Market Surface
+共同决定。
 
-Canonical market truth is `SignalBoard`.
+Agent Fabric 只在 agent 级别引用 `profile_id`，session 真正生效的执行结果会落到：
 
-Each board may include:
+- `resolved_execution_bindings`
 
-- `number_scores`
-- `structure_scores`
-- `play_size_scores`
-- `crowding_penalties`
-- `payout_surrogates`
-- `exclusions`
-- `evidence_refs`
-- `confidence`
-- `rationale`
+## 9. Shared Memory 模型
 
-Compatibility rule:
-
-- old generators may still emit `StrategyPrediction`
-- runtime adapts generator output into `SignalBoard` before the market stage
-- reports and payloads should prefer `signal_boards`
-
-## Handbook-Aligned Scoring
-
-The system now separates draw signals from crowding and payout concerns.
-
-Main scoring surfaces:
-
-- `draw_signal`
-- `anti_crowding`
-- `payout_surrogate`
-- `pattern_risk`
-
-Anti-crowding penalties include:
-
-- arithmetic progression risk
-- symmetry risk
-- geometric pattern risk
-- prior-winning-copy risk
-- shifted-winning-copy risk
-- hot/cold narrative risk
-- omission-chasing risk
-- beautiful-math-pattern risk
-
-Interpretation rule:
-
-- AC, sum, edge counts, and cluster counts are treated as filters or payout surrogates
-- they are not described as oracle-like predictors of the next draw
-
-## Shared Memory Model
-
-Letta is used as a shared-memory orchestration layer, not as the business state machine.
-
-Current shared blocks:
+默认主线使用这些核心 shared blocks：
 
 - `current_issue`
 - `visible_draw_history_digest`
@@ -199,109 +141,58 @@ Current shared blocks:
 - `purchase_board`
 - `handbook_principles`
 - `final_decision_constraints`
-- `recent_outcomes`
 - `report_digest`
 - `rule_digest`
 - `purchase_budget`
 
-Read/write intent:
+边界设计是：
 
-- current-issue dynamic state goes into shared blocks
-- long handbook text stays in prompt assets
-- phase transitions, settlement, reports, and issue truth stay inside `world_v2_runtime`
+- `market_board` 面向市场摘要层和购买层
+- `purchase_board` 面向主席收口与最终预测
+- `handbook_principles` 只给需要 handbook 的购买角色
 
-## Game Kernel
+## 10. Game Kernel、Kuzu、报告、缓存
 
-Happy8 now runs behind a game-kernel boundary.
+### Game Kernel
 
-Current layout:
+- 购买方案合法性、价格计算、结算都由 game definition 负责
 
-- `games/base.py`
-- `games/happy8/definition.py`
-- `games/happy8/features.py`
+### Kuzu
 
-Current `GameDefinition` responsibilities:
+- 负责工作区图谱同步
+- 负责 runtime projection 和前端观察面
+- 在默认 `no-MCP` 主线里不是 agent 工具链
 
-- validate selection
-- expand plan
-- price plan
-- settle plan
-- extract features
+### 报告
 
-Runtime rule:
+- `reports/` 输出回测报告、分期报告、issue ledger
 
-- `world_v2_runtime` depends on `game_id + play_mode + GameDefinition`
-- Happy8 constants, pricing rules, and settlement rules stay inside the game layer
+### Cache
 
-## Kuzu Role
+- 同 issue、同 prompt 的 agent 结果会写入 session / runtime cache，避免重复请求
 
-Kuzu is an analysis substrate, not a per-phase runtime burden.
+## 11. 前端原则
 
-Current use:
+这轮前端不追求重新设计整个工作台，只做语义收口：
 
-- workspace graph sync for prediction context
-- runtime market projection at round close
-- issue, influencer, faction, crowding, and similarity analysis
+- phase 名称必须对应当前主线
+- 活跃 agent 列表只显示 shipped roster
+- Kuzu 文案只表达“图谱 / 投影 / 观察面”
+- 不把旧的 judge / decision 当作默认运行角色继续展示
 
-Current performance rules:
+## 12. 后续演进方向
 
-- runtime projection is dirty-flagged
-- projection is not re-run after every phase
-- projection flushes at prediction close or settlement close
-- CSV import omits headers to avoid polluted graph rows
+当前默认主线已经收口，但 runtime 仍有继续拆边界的空间。后续优先方向是：
 
-## Result Cache
+1. `PhaseRunner`
+   只管阶段推进和 phase 状态写回。
+2. `AgentAssembler`
+   只管把 generator 与 Fabric agent 组装成 session agents。
+3. `PromptBindingService`
+   只管 prompt blocks、文档引用、chunking 与 bound docs 元信息。
+4. `SharedMemoryService`
+   只管 shared blocks 的生成、同步与可见性。
+5. `FinalDecisionService`
+   只管从 `final_plan` 到 `final_decision` 的收敛。
 
-Heavy agent outputs are cached with this key:
-
-- `target_issue`
-- `agent_id`
-- `visible_history_hash`
-- `prompt_hash`
-- `config_hash`
-
-Used for:
-
-- social
-- judge
-- `purchase_chair`
-- `handbook_decider`
-
-## Reporting
-
-The system writes:
-
-- timestamped run report
-- cumulative issue ledger
-- fixed per-issue reports
-
-Per-issue report naming:
-
-- `issue_064_report.json`
-- `issue_064_report.md`
-
-Per-issue report sections are fixed:
-
-1. `本期背景`
-2. `原始信号`
-3. `社交过程`
-4. `购买方案对比`
-5. `最终决策`
-6. `开奖后复盘`
-
-## UI Principles
-
-The inspector is primary. The graph is secondary.
-
-The user should be able to see:
-
-- current visible-through issue
-- current predicted issue
-- current phase and actor
-- current execution bindings by group and agent
-- generator boards
-- market discussion
-- purchase recommendation
-- official final decision
-- latest review
-- issue ledger
+这个方向的目标不是增加更多角色，而是让扩展购买人格、替换 prompt、切换 provider 时都落在清晰边界内。

@@ -16,7 +16,7 @@ const WORLD_GRAPH_LABEL = '内置世界上下文'
 
 const worldRunningMessage = (longRun) => (
   longRun
-    ? '持续世界正在推进：会先检查上一期是否可结算，再进入当前目标期的讨论、裁判和购买委员会。'
+    ? '持续世界正在推进：会先检查上一期是否可结算，再进入当前目标期的市场摘要、购买人格和最终预测。'
     : '持续世界正在推进当前目标期。'
 )
 
@@ -84,13 +84,12 @@ export const useLotteryLab = () => {
   const estimatedLLMCalls = computed(() => {
     if (isPersistentWorldMode(runtimeMode.value)) {
       const llmStrategies = selectedLLMCount.value
-      const specialistCalls = 1
-      const judgeCalls = 1
+      const socialCalls = 1
       const purchaseCalls = 4
       const rounds = agentDialogueEnabled.value ? Math.max(agentDialogueRounds.value, 1) : 1
       const debateCalls = rounds * Math.max(llmStrategies, 1)
       const debateSummaries = rounds
-      return llmStrategies + specialistCalls + judgeCalls + purchaseCalls + debateCalls + debateSummaries
+      return llmStrategies + socialCalls + purchaseCalls + debateCalls + debateSummaries
     }
     const pendingRuns = setup.overview.value?.pending_draws ? 1 : 0
     const periods = evaluationSize.value + pendingRuns

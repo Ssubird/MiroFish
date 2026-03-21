@@ -334,16 +334,17 @@ def test_world_advance_uses_market_runtime_and_projects_market_payload():
     assert pending["final_decision"]["numbers"] == [1, 2, 3, 4, 5]
     assert pending["final_decision"]["accepted_purchase_recommendation"] is True
     assert pending["market_discussion"]["social_posts"]
-    assert pending["market_discussion"]["judge_boards"]
-    assert any(item["event_type"] == "market_rank" for item in pending["world_timeline_preview"])
+    assert pending["market_discussion"]["judge_boards"] == []
+    assert not any(item["event_type"] == "market_rank" for item in pending["world_timeline_preview"])
     assert any(item["event_type"] == "purchase_decision" for item in pending["world_timeline_preview"])
+    assert any(item["event_type"] == "official_prediction" for item in pending["world_timeline_preview"])
     agent_ids = {item["session_agent_id"] for item in session["session"]["agents"]}
     assert "purchase_chair" in agent_ids
     assert "purchase_value_guard" in agent_ids
     assert "purchase_coverage_builder" in agent_ids
     assert "purchase_ziwei_conviction" in agent_ids
     assert "handbook_decider" not in agent_ids
-    assert "consensus_judge" in agent_ids
+    assert "consensus_judge" not in agent_ids
     assert "social_consensus_feed" in agent_ids
     assert "social_risk_feed" not in agent_ids
     assert "world_analyst" not in agent_ids
@@ -352,10 +353,10 @@ def test_world_advance_uses_market_runtime_and_projects_market_payload():
     assert session["session"]["latest_purchase_plan"]["ticket_count"] >= 1
 
 
-def test_market_v2_catalog_excludes_risk_guard_judge_by_default():
+def test_market_v2_catalog_ships_purchase_mainline_only():
     catalog = build_market_v2_catalog()
 
-    assert "consensus_judge" in catalog
+    assert "consensus_judge" not in catalog
     assert "risk_guard_judge" not in catalog
 
 
@@ -553,6 +554,8 @@ def test_world_advance_with_strict_letta_blocks_updates_shared_memory():
 
     assert result["world_session"]["status"] == "await_result"
     for agent in session["session"]["agents"]:
+        if agent["letta_agent_id"] == "-":
+            continue
         blocks = fake_client.blocks[agent["letta_agent_id"]]
         assert "report_digest" in blocks
         assert "rule_digest" in blocks

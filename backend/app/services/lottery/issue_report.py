@@ -142,12 +142,11 @@ def _raw_signals_section(round_state: dict[str, Any]) -> dict[str, Any]:
 
 def _social_process_section(round_state: dict[str, Any]) -> dict[str, Any]:
     social_events = list(round_state.get("social_events") or [])
-    judge_events = list(round_state.get("market_ranks") or [])
     return {
         "references": reference_lines(social_events),
-        "oppositions": opposition_lines(social_events, judge_events),
+        "oppositions": opposition_lines(social_events, []),
         "amplified_numbers": amplified_number_lines(social_events),
-        "crowded_structures": crowded_structure_lines(social_events, judge_events),
+        "crowded_structures": crowded_structure_lines(social_events, []),
     }
 
 
@@ -166,7 +165,7 @@ def _purchase_comparison_section(
         "combination_structure": dict(final_plan.get("plan_structure") or {}),
         "purchase_chair_numbers": list(reference_numbers(final_plan)),
         "official_numbers": list(item.get("official_prediction") or []),
-        "accepted_by_final_decider": bool(final_decision.get("accepted_purchase_recommendation", False)),
+        "accepted_by_purchase_chair": bool(final_decision.get("accepted_purchase_recommendation", False)),
     }
 
 

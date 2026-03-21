@@ -47,6 +47,7 @@
           @update:budgetYuan="$emit('update:budgetYuan', $event)"
           @update:llmParallelism="$emit('update:llmParallelism', $event)"
           @update:agentDialogueRounds="$emit('update:agentDialogueRounds', $event)"
+          @update:startNewSession="$emit('update:startNewSession', $event)"
           @update:visibleThroughPeriod="$emit('update:visibleThroughPeriod', $event)"
           @update:liveInterviewEnabled="$emit('update:liveInterviewEnabled', $event)"
           @update:selectedModelName="$emit('update:selectedModelName', $event)"
@@ -100,6 +101,7 @@ defineEmits([
   'update:budgetYuan',
   'update:llmParallelism',
   'update:agentDialogueRounds',
+  'update:startNewSession',
   'update:visibleThroughPeriod',
   'update:liveInterviewEnabled',
   'update:selectedModelName',
@@ -120,8 +122,9 @@ defineEmits([
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 1rem;
   height: 100%;
-  padding: 1.4rem;
-  background: #f8f7f4;
+  padding: 1.25rem;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.58), rgba(248, 240, 228, 0.72));
 }
 
 .workbench-header,
@@ -146,16 +149,22 @@ defineEmits([
   margin: 0;
 }
 
-.eyebrow,
+.eyebrow {
+  font-size: 0.76rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lottery-accent-strong, #7e4b1d);
+}
+
 .subtitle,
 .workbench-summary {
-  color: #666;
+  color: var(--lottery-muted, #6d5a48);
 }
 
 .workbench-copy h2 {
-  font-size: 1.8rem;
+  font-size: 1.9rem;
   line-height: 1.05;
-  color: #121212;
+  color: var(--lottery-panel-ink, #2f251a);
 }
 
 .subtitle {
@@ -166,41 +175,54 @@ defineEmits([
 .mode-switcher {
   display: flex;
   gap: 0.35rem;
-  padding: 0.25rem;
-  border-radius: 0.8rem;
-  background: #efefef;
+  padding: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
 }
 
 .mode-btn,
 .focus-btn,
 .workbench-summary span {
   border-radius: 999px;
-  border: 1px solid #e3e3e3;
-  background: #fff;
-  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--lottery-line, rgba(88, 66, 39, 0.12));
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.5rem 0.88rem;
   font: inherit;
 }
 
 .mode-btn,
 .focus-btn {
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  color: var(--lottery-muted, #6d5a48);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, color 0.2s ease;
 }
 
 .mode-btn.active {
-  background: #121212;
+  background: linear-gradient(135deg, var(--lottery-accent, #a66a2c), var(--lottery-accent-strong, #7e4b1d));
   color: #fff;
-  border-color: #121212;
+  border-color: transparent;
+  box-shadow: 0 12px 22px rgba(126, 75, 29, 0.2);
 }
 
 .mode-btn:hover,
 .focus-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(18, 18, 18, 0.08);
+  box-shadow: 0 10px 24px rgba(77, 57, 33, 0.1);
+}
+
+.focus-btn {
+  color: var(--lottery-ink, #21180f);
+}
+
+.workbench-summary {
+  gap: 0.65rem;
 }
 
 .workbench-summary span {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
+  color: var(--lottery-muted, #6d5a48);
+  background: rgba(255, 255, 255, 0.62);
 }
 
 .workbench-grid {
@@ -239,7 +261,7 @@ defineEmits([
 
 .workbench-pane::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(18, 18, 18, 0.14);
+  background: rgba(88, 66, 39, 0.16);
 }
 
 .workbench-pane :deep(.control-shell),
@@ -278,7 +300,7 @@ defineEmits([
   }
 
   .workbench-copy h2 {
-    font-size: 1.45rem;
+    font-size: 1.5rem;
   }
 }
 </style>

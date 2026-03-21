@@ -109,10 +109,19 @@
                 {{ period }}
               </option>
             </select>
-          </label>
-        </div>
+        </label>
+      </div>
 
-        <label class="toggle-field">
+      <label class="toggle-field">
+        <input
+          :checked="startNewSession"
+          type="checkbox"
+          @change="$emit('update:startNewSession', $event.target.checked)"
+        />
+        <span>本次强制新建会话，不续跑当前 session</span>
+      </label>
+
+      <label class="toggle-field">
           <input
             :checked="liveInterviewEnabled"
             type="checkbox"
@@ -229,7 +238,7 @@ import LotteryExecutionBindingsPanel from './LotteryExecutionBindingsPanel.vue'
 import LotteryWorldRuntimeReadiness from './LotteryWorldRuntimeReadiness.vue'
 import { groupLabel, kindLabel } from '../utils/lotteryDisplay'
 
-const FIELD_COUNT = 5
+const FIELD_COUNT = 6
 
 const props = defineProps({
   strategies: { type: Array, default: () => [] },
@@ -237,6 +246,7 @@ const props = defineProps({
   budgetYuan: { type: Number, default: 50 },
   llmParallelism: { type: Number, default: 8 },
   agentDialogueRounds: { type: Number, default: 1 },
+  startNewSession: { type: Boolean, default: false },
   liveInterviewEnabled: { type: Boolean, default: true },
   llmModels: { type: Array, default: () => [] },
   selectedModelName: { type: String, default: '' },
@@ -269,6 +279,7 @@ defineEmits([
   'update:budgetYuan',
   'update:llmParallelism',
   'update:agentDialogueRounds',
+  'update:startNewSession',
   'update:liveInterviewEnabled',
   'update:selectedModelName',
   'update:visibleThroughPeriod',

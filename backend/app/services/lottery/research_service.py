@@ -212,6 +212,7 @@ class LotteryResearchService:
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
+        force_new_session: bool = False,
         execution_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
         options = self._build_options(
@@ -232,6 +233,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            force_new_session,
             execution_overrides,
         )
         assets = self.runtime.load_workspace()
@@ -282,6 +284,7 @@ class LotteryResearchService:
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
+        force_new_session: bool = False,
         assets: WorkspaceAssets | None = None,
         visible_through_period: str | None = None,
         execution_overrides: dict[str, object] | None = None,
@@ -309,6 +312,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            force_new_session,
             execution_overrides,
         )
         if assets is None:
@@ -345,6 +349,7 @@ class LotteryResearchService:
         live_interview_enabled: bool = DEFAULT_LIVE_INTERVIEW_ENABLED,
         budget_yuan: int = DEFAULT_BUDGET_YUAN,
         session_id: str | None = None,
+        force_new_session: bool = False,
         visible_through_period: str | None = None,
         execution_overrides: dict[str, object] | None = None,
     ) -> dict[str, object]:
@@ -372,6 +377,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            force_new_session,
             execution_overrides,
         )
         assets = self._assets_for_visible_through_period(
@@ -387,6 +393,7 @@ class LotteryResearchService:
             options.model_name,
             options.session_id,
             options.execution_overrides,
+            options.force_new_session if runtime_mode == WORLD_V2_MARKET_RUNTIME_MODE else False,
         )
         return {
             "evaluation": {
@@ -574,6 +581,7 @@ class LotteryResearchService:
         live_interview_enabled: bool,
         budget_yuan: int,
         session_id: str | None,
+        force_new_session: bool,
         execution_overrides: dict[str, object] | None,
     ) -> LLMRunOptions:
         validate_request(
@@ -606,6 +614,7 @@ class LotteryResearchService:
             live_interview_enabled,
             budget_yuan,
             session_id,
+            force_new_session,
             self.execution_registry.normalize_overrides(execution_overrides),
         )
 

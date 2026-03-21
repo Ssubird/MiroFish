@@ -12,8 +12,6 @@ from .execution_registry import ExecutionRegistry
 
 DEFAULT_MAX_JSON_TOKENS = 1600
 DEFAULT_MAX_TEXT_TOKENS = 1200
-PASSAGE_LIMIT = 2
-PASSAGE_CHARS = 800
 
 
 class LocalWorldClient:
@@ -210,7 +208,7 @@ def _expects_json(content: str) -> bool:
 def _system_prompt(agent: dict[str, Any]) -> str:
     blocks = agent.get("memory_blocks", {})
     block_lines = [f"- {key}: {value}" for key, value in blocks.items() if str(value).strip()]
-    passages = [_clip(text) for text in list(agent.get("passages", []))[:PASSAGE_LIMIT]]
+    passages = [str(text).strip() for text in agent.get("passages", []) if str(text).strip()]
     sections = [
         "You are running inside MiroFish world_v2_market explicit no-MCP mode.",
         "There is no Letta orchestration and no MCP tool execution in this run.",
@@ -223,10 +221,3 @@ def _system_prompt(agent: dict[str, Any]) -> str:
         "When the user prompt asks for JSON, return JSON only.",
     ]
     return "\n".join(sections)
-
-
-def _clip(text: str) -> str:
-    compact = " ".join(str(text).split())
-    if len(compact) <= PASSAGE_CHARS:
-        return f"- {compact}"
-    return f"- {compact[:PASSAGE_CHARS].rstrip()}..."

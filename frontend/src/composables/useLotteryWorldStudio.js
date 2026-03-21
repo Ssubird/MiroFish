@@ -25,6 +25,7 @@ export const useLotteryWorldStudio = () => {
   const budgetYuan = ref(DEFAULT_BUDGET_YUAN)
   const llmParallelism = ref(DEFAULT_LLM_PARALLELISM)
   const agentDialogueRounds = ref(DEFAULT_DIALOGUE_ROUNDS)
+  const startNewSession = ref(false)
   const visibleThroughPeriod = ref('')
   const liveInterviewEnabled = ref(true)
   const selectedStrategyIds = ref([])
@@ -150,7 +151,15 @@ export const useLotteryWorldStudio = () => {
     const dialogueText = dialogueTotal > 0
       ? ` / 讨论 ${progress.dialogue_round_index || 0}/${dialogueTotal}`
       : ''
-    runMessage.value = `状态 ${activeSession.status || '-'} / 阶段 ${activeSession.current_phase || '-'}${dialogueText} / LLM 请求 ${requestCount} / 图节点 ${nodeCount}`
+    const bootstrapTotal = Number(progress.bootstrap_total_agents || 0)
+    const bootstrapText = bootstrapTotal > 0
+      ? ` / 初始化 ${progress.bootstrap_completed_agents || 0}/${bootstrapTotal} · ${progress.bootstrap_agent_name || progress.bootstrap_agent_id || '-'}`
+      : ''
+    const passageTotal = Number(progress.bootstrap_passage_total || 0)
+    const passageText = passageTotal > 0
+      ? ` / 文档 ${progress.bootstrap_passage_uploaded || 0}/${passageTotal}`
+      : ''
+    runMessage.value = `状态 ${activeSession.status || '-'} / 阶段 ${activeSession.current_phase || '-'}${dialogueText}${bootstrapText}${passageText} / LLM 请求 ${requestCount} / 图节点 ${nodeCount}`
 
     if (activeSession.status === 'failed' && activeSession.error?.message) {
       error.value = activeSession.error.message
@@ -232,7 +241,8 @@ export const useLotteryWorldStudio = () => {
         agent_dialogue_rounds: Math.min(Math.max(agentDialogueRounds.value, 0), MAX_DIALOGUE_ROUNDS),
         live_interview_enabled: liveInterviewEnabled.value,
         budget_yuan: budgetYuan.value,
-        session_id: currentSessionId.value || undefined,
+        session_id: startNewSession.value ? undefined : (currentSessionId.value || undefined),
+        force_new_session: startNewSession.value,
         visible_through_period: visibleThroughPeriod.value || undefined,
         execution_overrides: normalizeOverrides(executionOverrides.value)
       })
@@ -295,6 +305,7 @@ export const useLotteryWorldStudio = () => {
     budgetYuan,
     llmParallelism,
     agentDialogueRounds,
+    startNewSession,
     visibleThroughPeriod,
     liveInterviewEnabled,
     selectedStrategyIds,

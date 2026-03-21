@@ -112,6 +112,7 @@ MCP_SERVER_NAMES = (
     "kuzu_market_mcp",
     "report_memory_mcp",
 )
+BOOTSTRAP_PROGRESS_PERSIST_EVERY = 10
 WORLD_ROLES = (
     (
         "purchase_chair",
@@ -178,6 +179,7 @@ class LotteryWorldV2Runtime:
             options.model_name,
             options.session_id,
             options.execution_overrides,
+            getattr(options, "force_new_session", False),
         )
         self._apply_runtime_budget(session, options.budget_yuan)
         session["visible_through_period"] = _visible_through_period(assets)
@@ -205,15 +207,17 @@ class LotteryWorldV2Runtime:
         model_name: str | None,
         session_id: str | None = None,
         execution_overrides: Mapping[str, Any] | None = None,
+        force_new_session: bool = False,
     ) -> dict[str, Any]:
         self._agent_fabric_registry().validate_assets(assets)
-        if session_id and self.store.session_exists(session_id):
+        next_session_id = None if force_new_session else session_id
+        if not force_new_session and session_id and self.store.session_exists(session_id):
             session = self.store.load_session(session_id)
             if _session_compatible(session, strategies):
                 self._apply_execution_overrides(session, execution_overrides)
                 self._sync_asset_manifest(session, _pending_target_draw(assets).period)
                 return session
-        if not session_id:
+        if not force_new_session and not session_id:
             current_id = self.store.current_session_id()
             if current_id and self.store.session_exists(current_id):
                 session = self.store.load_session(current_id)
@@ -227,7 +231,7 @@ class LotteryWorldV2Runtime:
             pick_size,
             model_name,
             DEFAULT_BUDGET_YUAN,
-            session_id,
+            next_session_id,
             execution_overrides,
         )
         self._sync_asset_manifest(session, target_draw.period)
@@ -331,7 +335,7 @@ class LotteryWorldV2Runtime:
         session = self.store.load_session(session_id)
         display_name = agent_id
         group = "-"
-        if _session_has_agent(session, agent_id):
+        if _session_has_live_agent(session, agent_id):
             agent = _agent_by_id(session, agent_id)
             answer = self._send_message(session, agent["letta_agent_id"], _interview_prompt(session, prompt))
             display_name = agent["display_name"]
@@ -431,39 +435,24 @@ class LotteryWorldV2Runtime:
             leaderboard,
         )
         
-        # 3. market_rerank
-        market_ranks = self._phase_market_rerank(
-            session,
-            round_state,
-            context,
-            signal_outputs,
-            social_posts,
-            leaderboard,
-            options.parallelism,
-        )
-        
-        # 4. plan_synthesis
+        # 3. plan_synthesis
         synthesis, final_plan = self._phase_plan_synthesis(
             session,
             round_state,
+            context,
             target_draw.period,
             signal_outputs,
             social_posts,
-            market_ranks,
             options.parallelism,
         )
 
-        # 5. handbook_final_decision
-        final_decision = self._phase_handbook_final_decision(
+        # 4. final_decision
+        final_decision = self._phase_final_decision(
             session,
             round_state,
             target_draw,
-            signal_outputs,
-            social_posts,
-            market_ranks,
             synthesis,
             final_plan,
-            leaderboard,
         )
         
         self._finalize_await_result(
@@ -477,7 +466,6 @@ class LotteryWorldV2Runtime:
             final_decision,
             interviews,
             social_posts,
-            market_ranks,
             leaderboard,
         )
 
@@ -522,8 +510,10 @@ class LotteryWorldV2Runtime:
         cached_posts = list(round_state.get("social_events", []))
         if cached_posts and self._can_skip_phase(session, "social_propagation"):
             self._refresh_social_feed_block(session, cached_posts)
+            self._refresh_market_board_block(session, signal_outputs, cached_posts, leaderboard)
             return cached_posts, list(round_state.get("interviews", []))
         self._set_phase(session, "social_propagation")
+        self._ensure_live_agents(session, context, _phase_group_agent_ids(session, "social_propagation", "social"))
         
         interviews = []
         if options.live_interview_enabled:
@@ -543,6 +533,12 @@ class LotteryWorldV2Runtime:
         self._append_events(session, social_events)
         self._append_public_discussion(session, social_events, persist=True)
         self._refresh_social_feed_block(session, [item.to_dict() for item in social_events])
+        self._refresh_market_board_block(
+            session,
+            signal_outputs,
+            [item.to_dict() for item in social_events],
+            leaderboard,
+        )
         round_state["interviews"] = interviews
         round_state["social_events"] = [item.to_dict() for item in social_events]
         self._save_round_state(session, round_state)
@@ -550,33 +546,17 @@ class LotteryWorldV2Runtime:
         self._complete_phase(session, "social_propagation")
         return social_events, interviews
 
-    def _phase_market_rerank(self, session, round_state, context, signal_outputs, social_posts, leaderboard, parallelism: int):
-        cached = list(round_state.get("market_ranks", []))
-        if cached and self._can_skip_phase(session, "market_rerank"):
-            self._refresh_market_board_block(session, signal_outputs, social_posts, cached, leaderboard)
-            return cached
-        self._set_phase(session, "market_rerank")
-        judge_boards = self._judge_boards(session, signal_outputs, social_posts, leaderboard, parallelism)
-        self._append_events(session, judge_boards)
-        ranks = [item.to_dict() for item in judge_boards]
-        self._refresh_market_board_block(session, signal_outputs, social_posts, ranks, leaderboard)
-        round_state["market_ranks"] = ranks
-        self._save_round_state(session, round_state)
-        self._mark_runtime_projection_dirty(session)
-        self._complete_phase(session, "market_rerank")
-        return ranks
-
-    def _phase_plan_synthesis(self, session, round_state, period: str, signal_outputs, social_posts, market_ranks, parallelism: int):
+    def _phase_plan_synthesis(self, session, round_state, context, period: str, signal_outputs, social_posts, parallelism: int):
         if "plan_synthesis" in round_state and self._can_skip_phase(session, "plan_synthesis"):
             self._refresh_purchase_board_block(session, dict(round_state.get("final_plan", {})))
             return round_state["plan_synthesis"], dict(round_state.get("final_plan", {}))
         self._set_phase(session, "plan_synthesis")
+        self._ensure_live_agents(session, context, _phase_group_agent_ids(session, "plan_synthesis", "purchase"))
 
         synthesis, final_plan, events = self._synthesize_market(
             session,
             signal_outputs,
             social_posts,
-            market_ranks,
             parallelism,
         )
         round_state["plan_synthesis"] = synthesis
@@ -603,53 +583,37 @@ class LotteryWorldV2Runtime:
         self._complete_phase(session, "plan_synthesis")
         return synthesis, final_plan
 
-    def _phase_handbook_final_decision(
+    def _phase_final_decision(
         self,
         session,
         round_state,
         target_draw,
-        signal_outputs,
-        social_posts,
-        market_ranks,
         market_synthesis,
         final_plan,
-        leaderboard,
     ):
-        if "final_decision" in round_state and self._can_skip_phase(session, "handbook_final_decision"):
+        if "final_decision" in round_state and self._can_skip_phase(session, "final_decision"):
             return dict(round_state["final_decision"])
-        self._set_phase(session, "handbook_final_decision")
-        if _phase_group_agent_ids(session, "handbook_final_decision", "decision"):
-            final_decision, event = self._handbook_final_decision(
-                session,
-                target_draw.period,
-                signal_outputs,
-                social_posts,
-                market_ranks,
-                market_synthesis,
-                final_plan,
-                leaderboard,
-            )
-        else:
-            final_decision, event = self._purchase_chair_final_decision(
-                session,
-                target_draw.period,
-                market_synthesis,
-                final_plan,
-            )
+        self._set_phase(session, "final_decision")
+        final_decision, event = self._purchase_chair_final_decision(
+            session,
+            target_draw.period,
+            market_synthesis,
+            final_plan,
+        )
         round_state["final_decision"] = final_decision
         if event is not None:
             self._append_events(session, [event])
         self._set_issue_summary(
             session,
             period=target_draw.period,
-            phase="handbook_final_decision",
+            phase="final_decision",
             primary_numbers=list(final_decision.get("numbers", [])),
             alternate_numbers=list(final_decision.get("alternate_numbers", [])),
             trusted_strategy_ids=list(final_decision.get("trusted_strategy_ids", [])),
         )
         self._save_round_state(session, round_state)
         self._mark_runtime_projection_dirty(session)
-        self._complete_phase(session, "handbook_final_decision")
+        self._complete_phase(session, "final_decision")
         return final_decision
 
 
@@ -666,7 +630,6 @@ class LotteryWorldV2Runtime:
         final_decision,
         interviews,
         social_posts,
-        market_ranks,
         leaderboard,
     ) -> None:
         coordination = _round_trace(round_state, [])
@@ -682,7 +645,7 @@ class LotteryWorldV2Runtime:
         signal_boards = list(round_state.get("signal_boards") or [serialize_signal_output(item) for item in signal_outputs])
         market_discussion = {
             "social_posts": [item if isinstance(item, dict) else item.to_dict() for item in social_posts],
-            "judge_boards": [item if isinstance(item, dict) else item.to_dict() for item in market_ranks],
+            "judge_boards": [],
             "live_interviews": interviews,
         }
         session["latest_prediction"] = {
@@ -1104,20 +1067,120 @@ class LotteryWorldV2Runtime:
         refs.extend(_market_role_refs(session, fabric))
         refs.extend(_world_refs(fabric))
         session["agents"], session["agent_state"] = [], {}
-        parallelism = 1 if self._runtime_backend().startswith("letta") else min(len(refs), 6)
-        rows = _parallel_results(refs, parallelism, lambda ref: self._register_agent_payload(session, ref, context))
-        events = []
-        for agent_row, state_row, event in rows:
+        for ref in refs:
+            agent_row, state_row = self._agent_stub_payload(session, ref, context)
             session["agents"].append(agent_row)
             session["agent_state"][agent_row["session_agent_id"]] = state_row
-            self._attach_agent_tools(session, agent_row)
-            events.append(event)
         session["active_agent_ids"] = [item["session_agent_id"] for item in session["agents"]]
         self._refresh_execution_bindings(session)
-        self._append_events(session, events)
         self._persist_session(session)
 
+    def _ensure_live_agents(self, session, context, agent_ids: Iterable[str]) -> None:
+        pending_ids = [
+            agent_id
+            for agent_id in agent_ids
+            if _session_has_agent(session, agent_id) and not _session_has_live_agent(session, agent_id)
+        ]
+        if not pending_ids:
+            return
+        progress = session.setdefault("progress", {})
+        total = len(pending_ids)
+        for index, agent_id in enumerate(pending_ids, start=1):
+            agent = _agent_by_id(session, agent_id)
+            progress.update(
+                {
+                    "bootstrap_total_agents": total,
+                    "bootstrap_completed_agents": index - 1,
+                    "bootstrap_agent_id": agent_id,
+                    "bootstrap_agent_name": agent["display_name"],
+                    "bootstrap_passage_uploaded": 0,
+                    "bootstrap_passage_total": 0,
+                }
+            )
+            self._persist_session(session)
+            ref = WorldAgentRef(**_agent_ref_payload(agent))
+            live_row, state_row, event = self._register_agent_payload(session, ref, context)
+            _replace_agent_row(session, live_row)
+            merged_state = dict(session["agent_state"].get(agent_id, {}))
+            for key in (
+                "display_name",
+                "persona",
+                "group",
+                "role_kind",
+                "bound_prompt_docs",
+                "bound_prompt_passage_count",
+                "prompt_sources",
+                "execution_binding",
+            ):
+                merged_state[key] = state_row[key]
+            session["agent_state"][agent_id] = merged_state
+            self._attach_agent_tools(session, live_row)
+            self._append_events(session, [event])
+            progress["bootstrap_completed_agents"] = index
+            self._persist_session(session)
+        progress.update(
+            {
+                "bootstrap_total_agents": 0,
+                "bootstrap_completed_agents": 0,
+                "bootstrap_agent_id": None,
+                "bootstrap_agent_name": None,
+                "bootstrap_passage_uploaded": 0,
+                "bootstrap_passage_total": 0,
+            }
+        )
+        self._persist_session(session)
+
+    def _agent_stub_payload(self, session, ref, context):
+        agent_row, state_row, _, _, _ = self._agent_runtime_payload(session, ref, context)
+        return agent_row, state_row
+
     def _register_agent_payload(self, session, ref, context):
+        agent_row, state_row, prompt_passages, metadata, bankroll = self._agent_runtime_payload(session, ref, context)
+        letta_id = self._create_agent(
+            session,
+            ref.session_agent_id,
+            ref.description,
+            _initial_agent_blocks(
+                session,
+                ref.display_name,
+                ref.description,
+                bankroll,
+                _agent_shared_block_keys({"metadata": metadata}),
+            ),
+            {
+                "group": ref.group,
+                "role_kind": ref.role_kind,
+                "session_agent_id": ref.session_agent_id,
+                "execution_binding": agent_row["execution_binding"],
+            },
+        )
+        agent_row["letta_agent_id"] = letta_id
+        progress = session.setdefault("progress", {})
+        progress["bootstrap_passage_total"] = len(prompt_passages)
+        for index, text in enumerate(prompt_passages, start=1):
+            self._add_passage(session, letta_id, text, ["lottery", "prompt"])
+            if index % BOOTSTRAP_PROGRESS_PERSIST_EVERY == 0 or index == len(prompt_passages):
+                progress["bootstrap_passage_uploaded"] = index
+                self._persist_session(session)
+        event = self._event(
+            session["session_id"],
+            session.get("current_period") or "-",
+            session.get("current_phase") or "idle",
+            "agent_registered",
+            ref.session_agent_id,
+            ref.display_name,
+            f"role={ref.role_kind}, group={ref.group}",
+            metadata={
+                "group": ref.group,
+                "role_kind": ref.role_kind,
+                "bound_prompt_docs": state_row["bound_prompt_docs"],
+                "bound_prompt_passage_count": len(prompt_passages),
+                "execution_binding": agent_row["execution_binding"],
+            },
+        )
+        return agent_row, state_row, event
+
+    def _agent_runtime_payload(self, session, ref, context):
         bankroll = ""
         if ref.group in {"purchase", "bettor"}:
             bankroll = f"Budget {session['budget_yuan']} yuan. State tradeoffs and payoff target clearly."
@@ -1125,24 +1188,12 @@ class LotteryWorldV2Runtime:
         prompt_passages = list(bundle.passages)
         prompt_docs = list(bundle.document_names)
         binding = self._resolve_execution_binding(session, ref.session_agent_id, ref.role_kind, ref.group)
+        binding_payload = binding.to_dict()
         metadata = dict(ref.metadata or {})
-        metadata["execution_binding"] = binding.to_dict()
-        letta_id = self._create_agent(
-            session,
-            ref.session_agent_id,
-            ref.description,
-            _initial_agent_blocks(session, ref.display_name, ref.description, bankroll),
-            {
-                "group": ref.group,
-                "role_kind": ref.role_kind,
-                "session_agent_id": ref.session_agent_id,
-                "execution_binding": binding.to_dict(),
-            },
-        )
+        metadata["execution_binding"] = binding_payload
         agent_row = {
             **ref.to_dict(),
-            "letta_agent_id": letta_id,
-            "execution_binding": binding.to_dict(),
+            "execution_binding": binding_payload,
             "metadata": metadata,
         }
         state_row = {
@@ -1160,30 +1211,14 @@ class LotteryWorldV2Runtime:
             "bound_prompt_docs": prompt_docs,
             "bound_prompt_passage_count": len(prompt_passages),
             "prompt_sources": list(bundle.sources),
-            "execution_binding": binding.to_dict(),
+            "execution_binding": binding_payload,
         }
-        for text in prompt_passages:
-            self._add_passage(session, letta_id, text, ["lottery", "prompt"])
-        event = self._event(
-            session["session_id"],
-            session.get("current_period") or "-",
-            session.get("current_phase") or "idle",
-            "agent_registered",
-            ref.session_agent_id,
-            ref.display_name,
-            f"role={ref.role_kind}, group={ref.group}",
-            metadata={
-                "group": ref.group,
-                "role_kind": ref.role_kind,
-                "bound_prompt_docs": prompt_docs,
-                "bound_prompt_passage_count": len(prompt_passages),
-                "execution_binding": binding.to_dict(),
-            },
-        )
-        return agent_row, state_row, event
+        return agent_row, state_row, prompt_passages, metadata, bankroll
 
     def _attach_agent_tools(self, session, agent_row: dict[str, Any]) -> None:
         if self._mcp_disabled_mode():
+            return
+        if not _agent_has_live_runtime(agent_row):
             return
         role_kind = str(agent_row.get("role_kind", "")).strip()
         group = str(agent_row.get("group", "")).strip()
@@ -1532,7 +1567,7 @@ class LotteryWorldV2Runtime:
         )
         return serialized, event
 
-    def _purchase_persona_plans(self, session, period: str, signal_outputs, social_posts, market_ranks, parallelism: int):
+    def _purchase_persona_plans(self, session, period: str, signal_outputs, social_posts, parallelism: int):
         chair_id = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
         persona_ids = [item for item in _phase_group_agent_ids(session, "plan_synthesis", "purchase") if item != chair_id]
         if not persona_ids:
@@ -1540,7 +1575,7 @@ class LotteryWorldV2Runtime:
         results = _parallel_results(
             persona_ids,
             min(len(persona_ids), max(parallelism, 1)),
-            lambda agent_id: self._purchase_persona_result(session, period, signal_outputs, social_posts, market_ranks, agent_id),
+            lambda agent_id: self._purchase_persona_result(session, period, signal_outputs, social_posts, agent_id),
         )
         events = []
         plans = {}
@@ -1554,25 +1589,24 @@ class LotteryWorldV2Runtime:
             events.append(event)
         return events, plans
 
-    def _purchase_persona_result(self, session, period: str, signal_outputs, social_posts, market_ranks, agent_id: str):
+    def _purchase_persona_result(self, session, period: str, signal_outputs, social_posts, agent_id: str):
         agent = _agent_by_id(session, agent_id)
         try:
-            plan, event = self._purchase_persona_plan(session, period, signal_outputs, social_posts, market_ranks, agent_id)
+            plan, event = self._purchase_persona_plan(session, period, signal_outputs, social_posts, agent_id)
         except Exception as exc:
             return {"ok": False, "agent_id": agent_id, "display_name": agent["display_name"], "error": str(exc).strip() or exc.__class__.__name__}
         return {"ok": True, "plan": plan, "event": event}
 
-    def _purchase_persona_plan(self, session, period: str, signal_outputs, social_posts, market_ranks, agent_id: str):
+    def _purchase_persona_plan(self, session, period: str, signal_outputs, social_posts, agent_id: str):
         agent = _agent_by_id(session, agent_id)
         visible_signals = _filter_visible_signal_outputs(session, agent_id, signal_outputs)
         visible_posts = _filter_visible_events(session, agent_id, social_posts)
-        visible_ranks = _filter_visible_events(session, agent_id, market_ranks)
         prompt = "\n".join(
             [
                 session["shared_memory"]["current_issue"],
+                f"Market board:\n{session['shared_memory']['market_board']}",
                 f"Signal board:\n{_signal_output_block(visible_signals)}",
                 f"Social feed:\n{_event_digest_block(visible_posts)}",
-                f"Judge boards:\n{_event_digest_block(visible_ranks)}",
                 purchase_rule_block(),
                 f"Global budget cap: {_session_budget(session)} yuan.",
                 *_plan_guard_lines(_session_budget(session), _session_max_tickets(session)),
@@ -1613,20 +1647,19 @@ class LotteryWorldV2Runtime:
         )
         return serialized, event
 
-    def _synthesize_market(self, session, signal_outputs, social_posts, market_ranks, parallelism: int):
+    def _synthesize_market(self, session, signal_outputs, social_posts, parallelism: int):
         chair_id = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
         chair = _agent_by_id(session, chair_id)
         period = session.get("current_period") or "-"
-        persona_events, persona_plans = self._purchase_persona_plans(session, period, signal_outputs, social_posts, market_ranks, parallelism)
+        persona_events, persona_plans = self._purchase_persona_plans(session, period, signal_outputs, social_posts, parallelism)
         visible_signals = _filter_visible_signal_outputs(session, chair_id, signal_outputs)
         visible_posts = _filter_visible_events(session, chair_id, social_posts)
-        visible_ranks = _filter_visible_events(session, chair_id, market_ranks)
         prompt = "\n".join(
             [
                 session["shared_memory"]["current_issue"],
+                f"Market board:\n{session['shared_memory']['market_board']}",
                 f"Signal board:\n{_signal_output_block(visible_signals)}",
                 f"Social feed:\n{_event_digest_block(visible_posts)}",
-                f"Judge boards:\n{_event_digest_block(visible_ranks)}",
                 f"Purchase persona proposals:\n{_bet_plan_block(persona_plans)}",
                 purchase_rule_block(),
                 f"Global budget cap: {_session_budget(session)} yuan.",
@@ -1651,7 +1684,7 @@ class LotteryWorldV2Runtime:
         synthesis = market_synthesis_payload(
             signal_outputs=[serialize_signal_output(item) for item in visible_signals],
             social_posts=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in visible_posts],
-            judge_boards=[item.to_dict() if hasattr(item, "to_dict") else dict(item) for item in visible_ranks],
+            judge_boards=[],
             bet_plans=persona_plans,
             reference_plan_id=reference_plan_id,
             reference_plan=final_plan,
@@ -1672,7 +1705,7 @@ class LotteryWorldV2Runtime:
         market_synthesis,
         final_plan,
     ) -> tuple[dict[str, Any], WorldEvent]:
-        chair_id = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
+        chair_id = _phase_agent_id(session, "final_decision", "purchase", "purchase_chair")
         chair = _agent_by_id(session, chair_id)
         numbers = _purchase_final_numbers(market_synthesis, final_plan, session["pick_size"])
         if len(numbers) != session["pick_size"]:
@@ -1705,14 +1738,14 @@ class LotteryWorldV2Runtime:
         _record_agent_activity(
             session["agent_state"][chair_id],
             period,
-            "handbook_final_decision",
+            "final_decision",
             final_decision["rationale"],
             final_decision["numbers"],
         )
         event = self._event(
             session["session_id"],
             period,
-            "handbook_final_decision",
+            "final_decision",
             "official_prediction",
             chair_id,
             chair["display_name"],
@@ -1892,13 +1925,11 @@ class LotteryWorldV2Runtime:
         session,
         signal_outputs,
         social_posts,
-        market_ranks,
         leaderboard,
     ) -> None:
         session["shared_memory"]["market_board"] = _market_board_memory_block(
             signal_outputs,
             social_posts,
-            market_ranks,
             leaderboard,
         )
         self._sync_shared_blocks(session)
@@ -1985,6 +2016,8 @@ class LotteryWorldV2Runtime:
         for agent in session["agents"]:
             if allowed and agent["session_agent_id"] not in allowed:
                 continue
+            if not _agent_has_live_runtime(agent):
+                continue
             agent_cache = cache.setdefault(agent["session_agent_id"], {})
             for label in _agent_shared_block_keys(agent):
                 if label not in session["shared_memory"]:
@@ -2035,7 +2068,18 @@ class LotteryWorldV2Runtime:
 
     def _commentary(self, session, agent_id, phase, prompt) -> WorldEvent:
         agent = _agent_by_id(session, agent_id)
-        payload = parse_json_response(self._send_message(session, agent["letta_agent_id"], prompt))
+        if _agent_has_live_runtime(agent):
+            payload = parse_json_response(self._send_message(session, agent["letta_agent_id"], prompt))
+        else:
+            state = session["agent_state"][agent_id]
+            payload = {
+                "comment": (
+                    f"{state.get('display_name', agent_id)} keeps the current view. "
+                    f"Latest note: {state.get('last_comment', state.get('persona', ''))}"
+                ),
+                "focus": [],
+                "trusted_strategy_ids": [],
+            }
         event = self._event(
             session["session_id"],
             session.get("current_period") or "-",
@@ -2067,6 +2111,7 @@ class LotteryWorldV2Runtime:
         interview_ids = ordered[:3]
         if not interview_ids:
             return []
+        self._ensure_live_agents(session, context, interview_ids)
         return _parallel_results(
             interview_ids,
             parallelism,
@@ -2077,7 +2122,7 @@ class LotteryWorldV2Runtime:
         question = prediction_prompt(context, prediction, performance)
         answer = (
             self._send_message(session, _agent_by_id(session, prediction.strategy_id)["letta_agent_id"], question)
-            if _session_has_agent(session, prediction.strategy_id)
+            if _session_has_live_agent(session, prediction.strategy_id)
             else _rule_stage_interview(prediction, context.target_draw.period)
         )
         event = self._event(
@@ -3155,7 +3200,6 @@ def _social_feed_memory_block(social_posts) -> str:
 def _market_board_memory_block(
     signal_outputs,
     social_posts,
-    market_ranks,
     leaderboard,
 ) -> str:
     sections = [
@@ -3163,8 +3207,8 @@ def _market_board_memory_block(
         _signal_output_block(signal_outputs),
         "Social feed:",
         _social_feed_memory_block(social_posts),
-        "Judge boards:",
-        _event_digest_block(list(market_ranks or [])),
+        "Purchase-ready market summary:",
+        _social_feed_memory_block(social_posts),
         "Leaderboard:",
         _performance_block(_leaderboard_performance(leaderboard)),
     ]
@@ -3196,8 +3240,7 @@ def _final_decision_constraints_block(session, target_period: str) -> str:
     budget = int(session.get("budget_yuan", DEFAULT_BUDGET_YUAN))
     pick_size = int(session.get("pick_size", 5))
     purchase_owner = _phase_agent_id(session, "plan_synthesis", "purchase", "purchase_chair")
-    decision_agents = _phase_group_agent_ids(session, "handbook_final_decision", "decision")
-    final_owner = decision_agents[0] if decision_agents else purchase_owner
+    final_owner = _phase_agent_id(session, "final_decision", "purchase", purchase_owner)
     return "\n".join(
         [
             f"- visible_through_period={visible}",
@@ -3408,6 +3451,40 @@ def _agent_state_row(session, agent_id: str, display_name: str, persona: str):
 
 def _session_has_agent(session, agent_id: str) -> bool:
     return any(item["session_agent_id"] == agent_id for item in session["agents"])
+
+
+def _session_has_live_agent(session, agent_id: str) -> bool:
+    return any(
+        item["session_agent_id"] == agent_id and _agent_has_live_runtime(item)
+        for item in session.get("agents", [])
+    )
+
+
+def _agent_has_live_runtime(agent_row: Mapping[str, Any]) -> bool:
+    return bool(str(agent_row.get("letta_agent_id", "")).strip() not in {"", "-"})
+
+
+def _agent_ref_payload(agent_row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "session_agent_id": str(agent_row.get("session_agent_id", "")).strip(),
+        "display_name": str(agent_row.get("display_name", "")).strip(),
+        "role_kind": str(agent_row.get("role_kind", "")).strip(),
+        "group": str(agent_row.get("group", "")).strip(),
+        "letta_agent_id": str(agent_row.get("letta_agent_id", "")).strip() or "-",
+        "strategy_id": agent_row.get("strategy_id"),
+        "description": str(agent_row.get("description", "")).strip(),
+        "execution_binding": dict(agent_row.get("execution_binding") or {}),
+        "metadata": dict(agent_row.get("metadata") or {}),
+    }
+
+
+def _replace_agent_row(session, agent_row: Mapping[str, Any]) -> None:
+    target = str(agent_row.get("session_agent_id", "")).strip()
+    for index, current in enumerate(session.get("agents", [])):
+        if str(current.get("session_agent_id", "")).strip() != target:
+            continue
+        session["agents"][index] = dict(agent_row)
+        return
 
 
 def _session_compatible(session: dict[str, Any], strategies: dict[str, object]) -> bool:
@@ -3904,11 +3981,18 @@ def _initial_agent_blocks(
     display_name: str,
     description: str,
     bankroll: str,
+    shared_keys: Iterable[str],
 ) -> dict[str, str]:
     shared = dict(session.get("shared_memory", {}))
+    allowed = {str(item).strip() for item in shared_keys if str(item).strip()}
+    base_blocks = agent_blocks(display_name, description, bankroll)
     return {
-        **agent_blocks(display_name, description, bankroll),
-        **{key: str(shared.get(key, "")) for key in SHARED_BLOCKS if key in shared},
+        **{
+            key: value
+            for key, value in base_blocks.items()
+            if key == "world_goal" or key not in SHARED_BLOCKS or key in allowed
+        },
+        **{key: str(shared.get(key, "")) for key in allowed if key in shared},
     }
 
 
@@ -3952,8 +4036,6 @@ def _round_trace(round_state: dict[str, Any], debate_events: list[dict[str, Any]
         phases["social_propagation"].append(_trace_event_item(item))
     for item in round_state.get("social_events", []):
         phases["social_propagation"].append(_trace_event_item(item))
-    for item in round_state.get("market_ranks", []):
-        phases["market_rerank"].append(_trace_event_item(item))
     for item in debate_events:
         phases["social_propagation"].append(_trace_event_item(item))
     synthesis = round_state.get("plan_synthesis", {})
@@ -3986,7 +4068,7 @@ def _round_trace(round_state: dict[str, Any], debate_events: list[dict[str, Any]
         owner_id = str(final_decision.get("decision_owner", "purchase_chair")).strip() or "purchase_chair"
         owner_name = str(final_decision.get("decision_owner_name", "LLM-Purchase-Chair")).strip() or "LLM-Purchase-Chair"
         owner_group = str(final_decision.get("decision_owner_group", "purchase")).strip() or "purchase"
-        phases["handbook_final_decision"].append(
+        phases["final_decision"].append(
             {
                 "strategy_id": owner_id,
                 "display_name": owner_name,

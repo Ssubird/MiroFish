@@ -27,7 +27,7 @@ shared_memory_keys:
   - report_digest
   - rule_digest
   - purchase_budget
-visible_groups: [data, metaphysics, hybrid, social, judge, purchase]
+visible_groups: [data, metaphysics, hybrid, social, purchase]
 visible_agents: []
 dialogue_policy:
   mode: disabled
