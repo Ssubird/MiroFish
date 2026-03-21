@@ -6,12 +6,19 @@ import os
 import sys
 
 
+def _try_reconfigure_utf8(stream) -> None:
+    if not hasattr(stream, "reconfigure"):
+        return
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
+        return
+
+
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    _try_reconfigure_utf8(sys.stdout)
+    _try_reconfigure_utf8(sys.stderr)
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
