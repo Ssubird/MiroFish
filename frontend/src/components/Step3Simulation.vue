@@ -513,6 +513,7 @@ const fetchRunStatus = async () => {
       
       // 检测模拟是否已完成（通过 runner_status 或平台完成状态判断）
       const isCompleted = data.runner_status === 'completed' || data.runner_status === 'stopped'
+      const isFailed = data.runner_status === 'failed'
       
       // 额外检查：如果后端还没来得及更新 runner_status，但平台已经报告完成
       // 通过检测 twitter_completed 和 reddit_completed 状态判断
@@ -526,6 +527,11 @@ const fetchRunStatus = async () => {
         phase.value = 2
         stopPolling()
         emit('update-status', 'completed')
+      } else if (isFailed) {
+        addLog(t('log.simFailed') + (data.error ? `: ${data.error}` : ''))
+        phase.value = 2
+        stopPolling()
+        emit('update-status', 'error')
       }
     }
   } catch (err) {
