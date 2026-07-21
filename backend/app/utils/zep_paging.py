@@ -107,9 +107,9 @@ def fetch_all_edges(
     client: Zep,
     graph_id: str,
     page_size: int = _DEFAULT_PAGE_SIZE,
-    max_items: int = _MAX_EDGES,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     retry_delay: float = _DEFAULT_RETRY_DELAY,
+    max_items: int = _MAX_EDGES,
 ) -> list[Any]:
     """分页获取图谱所有边，最多返回 max_items 条（默认 5000）。每页请求自带重试。"""
     all_edges: list[Any] = []
