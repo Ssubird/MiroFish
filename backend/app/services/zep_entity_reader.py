@@ -165,17 +165,35 @@ class ZepEntityReader:
         logger.info(f"共获取 {len(edges_data)} 条边")
         return edges_data
     
-    def get_node_edges(self, node_uuid: str) -> List[Dict[str, Any]]:
+    def get_node_edges(
+        self,
+        node_uuid: str,
+        *,
+        graph_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
-        获取指定节点的所有相关边（带重试机制）
+        获取指定节点的相关边。
+
+        Zep Cloud 3.25 的 ``graph.node.get_edges`` 实测只返回节点作为
+        source 的边，尽管文档将其描述为“all edges”。需要完整上下文时必须
+        提供 graph_id，以全图分页后同时筛选 incoming 和 outgoing 边。
         
         Args:
             node_uuid: 节点UUID
+            graph_id: 图谱ID；提供时保证返回双向完整关系
             
         Returns:
             边列表
         """
         try:
+            if graph_id:
+                return [
+                    edge
+                    for edge in self.get_all_edges(graph_id)
+                    if edge["source_node_uuid"] == node_uuid
+                    or edge["target_node_uuid"] == node_uuid
+                ]
+
             # 使用重试机制调用Zep API
             edges = self._call_with_retry(
                 func=lambda: self.client.graph.node.get_edges(node_uuid=node_uuid),
@@ -344,7 +362,7 @@ class ZepEntityReader:
                 return None
             
             # 获取节点的边
-            edges = self.get_node_edges(entity_uuid)
+            edges = self.get_node_edges(entity_uuid, graph_id=graph_id)
             
             # 获取所有节点用于关联查找
             all_nodes = self.get_all_nodes(graph_id)

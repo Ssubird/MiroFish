@@ -56,6 +56,70 @@ def test_profile_context_search_caps_both_queries_sent_to_zep():
     assert all(0 < len(call["query"]) <= 400 for call in calls)
 
 
+def test_entity_context_includes_incoming_edges_from_the_full_graph():
+    incoming = {
+        "uuid": "edge-in",
+        "name": "WORKS_AT",
+        "fact": "Alice works at Acme",
+        "source_node_uuid": "alice",
+        "target_node_uuid": "acme",
+        "attributes": {},
+    }
+    outgoing = {
+        "uuid": "edge-out",
+        "name": "BUILDS",
+        "fact": "Acme builds Product",
+        "source_node_uuid": "acme",
+        "target_node_uuid": "product",
+        "attributes": {},
+    }
+    unrelated = {
+        "uuid": "edge-unrelated",
+        "name": "LOCATED_IN",
+        "fact": "OtherCo is located in Paris",
+        "source_node_uuid": "other-company",
+        "target_node_uuid": "paris",
+        "attributes": {},
+    }
+
+    reader = object.__new__(ZepEntityReader)
+    reader.client = SimpleNamespace(
+        graph=SimpleNamespace(
+            node=SimpleNamespace(
+                get=lambda **_kwargs: SimpleNamespace(
+                    uuid_="acme",
+                    name="Acme",
+                    labels=["Company"],
+                    summary="",
+                    attributes={},
+                ),
+                # Real Cloud 3.25 omits incoming edges here.
+                get_edges=lambda **_kwargs: [SimpleNamespace(**outgoing)],
+            )
+        )
+    )
+    reader.get_all_edges = lambda _graph_id: [incoming, outgoing, unrelated]
+    reader.get_all_nodes = lambda _graph_id: [
+        {"uuid": "alice", "name": "Alice", "labels": ["Person"], "summary": ""},
+        {"uuid": "acme", "name": "Acme", "labels": ["Company"], "summary": ""},
+        {"uuid": "product", "name": "Product", "labels": ["Product"], "summary": ""},
+    ]
+
+    entity = reader.get_entity_with_context("graph-id", "acme")
+
+    assert entity is not None
+    assert len(entity.related_edges) == 2
+    assert {edge["edge_name"] for edge in entity.related_edges} == {
+        "WORKS_AT",
+        "BUILDS",
+    }
+    assert {edge["direction"] for edge in entity.related_edges} == {
+        "incoming",
+        "outgoing",
+    }
+    assert {node["name"] for node in entity.related_nodes} == {"Alice", "Product"}
+
+
 def test_entity_reader_does_not_turn_auth_failure_into_missing_entity():
     def unauthorized(**_kwargs):
         raise ZepApiError(status_code=401, body={"message": "unauthorized"})
