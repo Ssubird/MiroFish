@@ -612,12 +612,17 @@ def prepare_simulation():
                     progress_callback=progress_callback,
                     parallel_profile_count=parallel_profile_count
                 )
-                
-                # 任务完成
-                task_manager.complete_task(
-                    task_id,
-                    result=result_state.to_simple_dict()
-                )
+
+                if result_state.status == SimulationStatus.FAILED:
+                    task_manager.fail_task(
+                        task_id,
+                        result_state.error or "模拟准备失败"
+                    )
+                else:
+                    task_manager.complete_task(
+                        task_id,
+                        result=result_state.to_simple_dict()
+                    )
                 
             except Exception as e:
                 logger.error(f"准备模拟失败: {str(e)}")
@@ -1123,6 +1128,8 @@ def get_simulation_profiles_realtime(simulation_id: str):
         # 检查是否正在生成（通过 state.json 判断）
         is_generating = False
         total_expected = None
+        status = None
+        error = None
         
         state_file = os.path.join(sim_dir, "state.json")
         if os.path.exists(state_file):
@@ -1132,6 +1139,7 @@ def get_simulation_profiles_realtime(simulation_id: str):
                     status = state_data.get("status", "")
                     is_generating = status == "preparing"
                     total_expected = state_data.get("entities_count")
+                    error = state_data.get("error")
             except Exception:
                 pass
         
@@ -1143,6 +1151,8 @@ def get_simulation_profiles_realtime(simulation_id: str):
                 "count": len(profiles),
                 "total_expected": total_expected,
                 "is_generating": is_generating,
+                "status": status,
+                "error": error,
                 "file_exists": file_exists,
                 "file_modified_at": file_modified_at,
                 "profiles": profiles
@@ -1218,6 +1228,9 @@ def get_simulation_config_realtime(simulation_id: str):
         # 检查是否正在生成（通过 state.json 判断）
         is_generating = False
         generation_stage = None
+        status = None
+        error = None
+        profiles_generated = False
         config_generated = False
         
         state_file = os.path.join(sim_dir, "state.json")
@@ -1226,17 +1239,21 @@ def get_simulation_config_realtime(simulation_id: str):
                 with open(state_file, 'r', encoding='utf-8') as f:
                     state_data = json.load(f)
                     status = state_data.get("status", "")
+                    error = state_data.get("error")
                     is_generating = status == "preparing"
+                    profiles_generated = state_data.get("profiles_generated", False)
                     config_generated = state_data.get("config_generated", False)
                     
                     # 判断当前阶段
                     if is_generating:
-                        if state_data.get("profiles_generated", False):
+                        if profiles_generated:
                             generation_stage = "generating_config"
                         else:
                             generation_stage = "generating_profiles"
                     elif status == "ready":
                         generation_stage = "completed"
+                    elif status == "failed":
+                        generation_stage = "failed"
             except Exception:
                 pass
         
@@ -1246,7 +1263,10 @@ def get_simulation_config_realtime(simulation_id: str):
             "file_exists": file_exists,
             "file_modified_at": file_modified_at,
             "is_generating": is_generating,
+            "status": status,
+            "error": error,
             "generation_stage": generation_stage,
+            "profiles_generated": profiles_generated,
             "config_generated": config_generated,
             "config": config
         }

@@ -60,6 +60,7 @@ class SimulationState:
     entity_types: List[str] = field(default_factory=list)
     
     # 配置生成信息
+    profiles_generated: bool = False
     config_generated: bool = False
     config_reasoning: str = ""
     
@@ -87,6 +88,7 @@ class SimulationState:
             "entities_count": self.entities_count,
             "profiles_count": self.profiles_count,
             "entity_types": self.entity_types,
+            "profiles_generated": self.profiles_generated,
             "config_generated": self.config_generated,
             "config_reasoning": self.config_reasoning,
             "current_round": self.current_round,
@@ -116,6 +118,7 @@ class SimulationState:
             "entities_count": self.entities_count,
             "profiles_count": self.profiles_count,
             "entity_types": self.entity_types,
+            "profiles_generated": self.profiles_generated,
             "config_generated": self.config_generated,
             "error": self.error,
         }
@@ -187,6 +190,7 @@ class SimulationManager:
             entities_count=data.get("entities_count", 0),
             profiles_count=data.get("profiles_count", 0),
             entity_types=data.get("entity_types", []),
+            profiles_generated=data.get("profiles_generated", False),
             config_generated=data.get("config_generated", False),
             config_reasoning=data.get("config_reasoning", ""),
             current_round=data.get("current_round", 0),
@@ -274,6 +278,10 @@ class SimulationManager:
         
         try:
             state.status = SimulationStatus.PREPARING
+            state.error = None
+            state.profiles_generated = False
+            state.config_generated = False
+            state.config_reasoning = ""
             self._save_simulation_state(state)
             
             sim_dir = self._get_simulation_dir(simulation_id)
@@ -308,7 +316,7 @@ class SimulationManager:
                 state.status = SimulationStatus.FAILED
                 state.error = "没有找到符合条件的实体，请检查图谱是否正确构建"
                 self._save_simulation_state(state)
-                return state
+                raise ValueError(state.error)
             
             # ========== 阶段2: 生成Agent Profile ==========
             total_entities = len(filtered.entities)
@@ -356,6 +364,8 @@ class SimulationManager:
             )
             
             state.profiles_count = len(profiles)
+            state.profiles_generated = len(profiles) > 0
+            self._save_simulation_state(state)
             
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
             # Reddit 已经在生成过程中实时保存了，这里再保存一次确保完整性
